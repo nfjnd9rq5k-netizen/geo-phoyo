@@ -1,34 +1,26 @@
 """
 MITM Proxy Script — Intercepte le trafic Certificall.
 - Modifie les reponses 401/403 en 200 OK
-- Ajoute une IP aleatoire dans X-Forwarded-For a chaque requete
+- Lit l'IP depuis ip_config.txt (mis a jour par le dashboard)
 """
 
 import json
-import random
+import os
 from mitmproxy import http, ctx
 
-
-def _random_french_ip():
-    """Genere une IP aleatoire dans des plages francaises courantes."""
-    ranges = [
-        (86, 192, 255),    # Free
-        (90, 0, 255),      # Free
-        (78, 192, 255),    # SFR
-        (92, 128, 255),    # SFR
-        (176, 128, 191),   # OVH Mobile
-        (109, 0, 63),      # Bouygues
-        (82, 64, 127),     # Orange
-        (83, 112, 127),    # Orange
-        (88, 0, 63),       # Orange
-        (2, 0, 15),        # Orange
-    ]
-    first, low, high = random.choice(ranges)
-    return f"{first}.{random.randint(low, high)}.{random.randint(1, 254)}.{random.randint(1, 254)}"
+CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ip_config.txt")
 
 
-# IP fixe pour la session (change a chaque redemarrage du proxy)
-SESSION_IP = _random_french_ip()
+def _get_ip():
+    """Lit l'IP depuis le fichier de config."""
+    try:
+        with open(CONFIG_FILE, "r") as f:
+            ip = f.read().strip()
+            if ip:
+                return ip
+    except FileNotFoundError:
+        pass
+    return "86.234.12.45"
 
 
 def request(flow: http.HTTPFlow) -> None:
@@ -36,9 +28,9 @@ def request(flow: http.HTTPFlow) -> None:
     if "certificall" not in host:
         return
 
-    # Ajouter/remplacer X-Forwarded-For avec une IP aleatoire
-    flow.request.headers["X-Forwarded-For"] = SESSION_IP
-    ctx.log.warn(f"[REQ] {flow.request.method} {flow.request.path} (IP: {SESSION_IP})")
+    ip = _get_ip()
+    flow.request.headers["X-Forwarded-For"] = ip
+    ctx.log.warn(f"[REQ] {flow.request.method} {flow.request.path} (IP: {ip})")
 
 
 def response(flow: http.HTTPFlow) -> None:
@@ -53,11 +45,6 @@ def response(flow: http.HTTPFlow) -> None:
     ctx.log.warn(f"[RESP] {status} {method} {path}")
 
     if status in (401, 403):
-        try:
-            body = flow.response.content.decode("utf-8", errors="ignore")[:500]
-        except Exception:
-            body = ""
-
         ctx.log.error(f"[BYPASS] {status} -> 200 | {method} {path}")
 
         fake_body = {

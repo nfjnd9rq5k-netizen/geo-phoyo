@@ -56,6 +56,13 @@ class GeoPhotoOrchestrator:
 
     def setup(self):
         """Initialise ADB, verifie les prerequis. Retourne un dict de status."""
+        # Initialiser l'IP dans le fichier config pour le proxy MITM
+        ip_config = os.path.join(SCRIPT_DIR, "ip_config.txt")
+        with self.state_lock:
+            ip = self.state["ip"]
+        with open(ip_config, "w") as f:
+            f.write(ip)
+
         self.adb_path = bsc.find_adb()
         status = {
             "adb_found": self.adb_path is not None,
@@ -306,15 +313,15 @@ CONFIG.network.enabled = true;
         bsc.set_gps_via_geo_fix(lat, lon, self.adb_path)
 
     def update_ip(self, ip):
-        """Met a jour l'IP spoofee."""
+        """Met a jour l'IP spoofee (ecrit dans ip_config.txt pour le proxy MITM)."""
         with self.state_lock:
             self.state["ip"] = ip
 
-        if self.frida_script:
-            try:
-                self.frida_script.exports_sync.set_ip(ip)
-            except Exception as e:
-                self._log(f"IP Frida echec: {e}")
+        # Ecrire l'IP dans le fichier que le proxy MITM lit
+        ip_config = os.path.join(SCRIPT_DIR, "ip_config.txt")
+        with open(ip_config, "w") as f:
+            f.write(ip)
+        self._log(f"IP mise a jour: {ip}")
 
         # Re-push le script hooks avec la nouvelle IP
         if self.state.get("frida_active"):

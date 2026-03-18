@@ -8,3 +8,4 @@ frida-gadget*.so
 debug.keystore
 apktool.jar
 .claude/
+ip_config.txt
