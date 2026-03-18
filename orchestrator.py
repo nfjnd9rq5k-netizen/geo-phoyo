@@ -93,6 +93,82 @@ class GeoPhotoOrchestrator:
 
     # ── Photo pipeline ──
 
+    def _inject_camera_metadata(self, image_path):
+        """Ajoute les metadonnees camera realistes si absentes."""
+        import piexif
+        import random
+
+        try:
+            exif_dict = piexif.load(image_path)
+        except Exception:
+            return
+
+        ifd0 = exif_dict.setdefault("0th", {})
+        exif_ifd = exif_dict.setdefault("Exif", {})
+
+        # Make/Model Samsung Galaxy S21
+        if not ifd0.get(piexif.ImageIFD.Make):
+            ifd0[piexif.ImageIFD.Make] = b"samsung"
+        if not ifd0.get(piexif.ImageIFD.Model):
+            ifd0[piexif.ImageIFD.Model] = b"SM-G991B"
+        if not ifd0.get(piexif.ImageIFD.Software):
+            ifd0[piexif.ImageIFD.Software] = b"G991BXXS7DWBA"
+
+        # Parametres camera realistes (Galaxy S21 main camera)
+        if not exif_ifd.get(piexif.ExifIFD.FocalLength):
+            exif_ifd[piexif.ExifIFD.FocalLength] = (6400, 1000)  # 6.4mm
+        if not exif_ifd.get(piexif.ExifIFD.FocalLengthIn35mmFilm):
+            exif_ifd[piexif.ExifIFD.FocalLengthIn35mmFilm] = 26
+        if not exif_ifd.get(piexif.ExifIFD.FNumber):
+            exif_ifd[piexif.ExifIFD.FNumber] = (180, 100)  # f/1.8
+        if not exif_ifd.get(piexif.ExifIFD.ISOSpeedRatings):
+            exif_ifd[piexif.ExifIFD.ISOSpeedRatings] = random.choice([50, 80, 100, 125, 160, 200, 250])
+        if not exif_ifd.get(piexif.ExifIFD.ExposureTime):
+            exif_ifd[piexif.ExifIFD.ExposureTime] = random.choice([
+                (1, 120), (1, 100), (1, 200), (1, 250), (1, 500), (1, 60)
+            ])
+        if not exif_ifd.get(piexif.ExifIFD.ExposureProgram):
+            exif_ifd[piexif.ExifIFD.ExposureProgram] = 2  # Normal
+        if not exif_ifd.get(piexif.ExifIFD.MeteringMode):
+            exif_ifd[piexif.ExifIFD.MeteringMode] = 2  # Center-weighted
+        if not exif_ifd.get(piexif.ExifIFD.Flash):
+            exif_ifd[piexif.ExifIFD.Flash] = 0  # No flash
+        if not exif_ifd.get(piexif.ExifIFD.WhiteBalance):
+            exif_ifd[piexif.ExifIFD.WhiteBalance] = 0  # Auto
+        if not exif_ifd.get(piexif.ExifIFD.ColorSpace):
+            exif_ifd[piexif.ExifIFD.ColorSpace] = 1  # sRGB
+        if not exif_ifd.get(piexif.ExifIFD.SceneCaptureType):
+            exif_ifd[piexif.ExifIFD.SceneCaptureType] = 0  # Standard
+        if not exif_ifd.get(piexif.ExifIFD.ExifVersion):
+            exif_ifd[piexif.ExifIFD.ExifVersion] = b"0232"
+
+        # SubSecTime realiste
+        subsec = str(random.randint(100, 999)).encode()
+        for tag in [piexif.ExifIFD.SubSecTime, piexif.ExifIFD.SubSecTimeOriginal, piexif.ExifIFD.SubSecTimeDigitized]:
+            if not exif_ifd.get(tag):
+                exif_ifd[tag] = subsec
+
+        # Image dimensions
+        try:
+            from PIL import Image
+            img = Image.open(image_path)
+            w, h = img.size
+            ifd0[piexif.ImageIFD.ImageWidth] = w
+            ifd0[piexif.ImageIFD.ImageLength] = h
+            exif_ifd[piexif.ExifIFD.PixelXDimension] = w
+            exif_ifd[piexif.ExifIFD.PixelYDimension] = h
+        except Exception:
+            pass
+
+        # YCbCrPositioning (standard pour photos camera)
+        ifd0[piexif.ImageIFD.YCbCrPositioning] = 1
+
+        try:
+            exif_bytes = piexif.dump(exif_dict)
+            piexif.insert(exif_bytes, image_path)
+        except Exception:
+            pass
+
     def process_photo(self, input_path, filename):
         """Modifie EXIF + push vers BlueStacks. Retourne (success, message)."""
         os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -101,6 +177,9 @@ class GeoPhotoOrchestrator:
             lat = self.state["lat"]
             lon = self.state["lon"]
             alt = self.state["altitude"]
+
+        # Injecter les metadonnees camera AVANT geo.py (pour qu'il les preserve)
+        self._inject_camera_metadata(input_path)
 
         try:
             modify_geolocation(input_path, lat, lon, altitude=alt)
