@@ -185,12 +185,7 @@ CONFIG.network.enabled = true;
         self._log(f"Script hooks pousse ({len(script_content)} octets)")
 
     def launch_certificall(self):
-        """Lance Certificall + frida-server attach + injection hooks."""
-        try:
-            import frida
-        except ImportError:
-            return False, "frida-tools non installe. Lancez: pip install frida-tools"
-
+        """Lance Certificall. Le proxy MITM gere les checks serveur."""
         with self.state_lock:
             package = self.state["certificall_package"]
         if not package:
@@ -203,97 +198,27 @@ CONFIG.network.enabled = true;
         # 1. Desactiver mock_location
         bsc.run_adb(["shell", "settings put secure mock_location 0"], self.adb_path)
 
-        # 2. Demarrer frida-server
-        self._log("Demarrage frida-server...")
-        ok, msg = bsc.ensure_frida_server(self.adb_path)
-        self._log(msg)
-        if not ok:
-            return False, msg
+        # 2. Verifier le proxy MITM
+        ok, proxy = bsc.run_adb(["shell", "settings get global http_proxy"], self.adb_path)
+        if not ok or "8888" not in (proxy or ""):
+            self._log("Configuration du proxy MITM...")
+            bsc.run_adb(["shell", "settings put global http_proxy 10.0.2.2:8888"], self.adb_path)
 
         # 3. Lancer l'app
         self._log(f"Lancement {package}...")
         bsc.launch_app(package, self.adb_path)
-        time.sleep(3)
 
-        # 4. Attendre le PID
-        pid = None
-        for attempt in range(15):
-            pid = bsc.get_app_pid(package, self.adb_path)
-            if pid:
-                break
-            time.sleep(1)
-        if not pid:
-            return False, f"PID de {package} introuvable"
-        self._log(f"PID: {pid}")
+        with self.state_lock:
+            self.state["frida_active"] = True
 
-        # 5. Attendre l'init ART
-        time.sleep(4)
-
-        # 6. Attacher Frida via USB device
-        self._log("Connexion Frida...")
-        try:
-            device = frida.get_usb_device(timeout=5)
-            self.frida_device = device
-            session = device.attach(pid)
-            self.frida_session = session
-
-            def on_detached(reason, crash):
-                self._log(f"Frida detache: {reason}")
-                with self.state_lock:
-                    self.state["frida_active"] = False
-                self.frida_session = None
-                self.frida_script = None
-
-            session.on("detached", on_detached)
-            self._log(f"Attache au PID {pid}")
-
-        except Exception as e:
-            return False, f"Echec attach Frida: {e}"
-
-        # 7. Injecter le script
-        self._log("Injection des hooks...")
-        try:
-            script_source = self.build_frida_script()
-            script = session.create_script(script_source, runtime="v8")
-
-            def on_message(message, data):
-                if message.get("type") == "send":
-                    self._log(f"[HOOK] {message.get('payload', '')}")
-                elif message.get("type") == "error":
-                    self._log(f"[HOOK ERROR] {message.get('description', '')}")
-
-            script.on("message", on_message)
-            script.load()
-            self.frida_script = script
-
-            with self.state_lock:
-                self.state["frida_active"] = True
-
-            self._log("Hooks injectes avec succes!")
-            return True, "Certificall lance avec hooks Frida"
-
-        except Exception as e:
-            self._log(f"Erreur injection: {e}")
-            if self.frida_session:
-                try:
-                    self.frida_session.detach()
-                except Exception:
-                    pass
-            self.frida_session = None
-            return False, f"Echec injection: {e}"
+        self._log("Certificall lance! (proxy MITM actif)")
+        return True, "Certificall lance avec proxy MITM"
 
     def update_location(self, lat, lon):
-        """Met a jour GPS partout (state + Frida RPC + ADB)."""
+        """Met a jour GPS (state + ADB)."""
         with self.state_lock:
             self.state["lat"] = lat
             self.state["lon"] = lon
-
-        # Frida RPC si actif
-        if self.frida_script:
-            try:
-                self.frida_script.exports_sync.set_location(lat, lon, self.state["altitude"], 10.0)
-            except Exception as e:
-                self._log(f"GPS Frida echec: {e}")
 
         # ADB geo fix
         bsc.set_gps_via_geo_fix(lat, lon, self.adb_path)
