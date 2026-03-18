@@ -209,10 +209,11 @@ def is_pict2cam_installed(adb_path=None):
     return success and "pict2cam" in output
 
 
-def launch_app(package, adb_path=None):
-    """Force-stop puis lance une app via monkey."""
-    run_adb(["shell", "am", "force-stop", package], adb_path)
-    time.sleep(0.5)
+def launch_app(package, adb_path=None, force_stop=False):
+    """Lance une app via monkey. force_stop=False pour garder la session."""
+    if force_stop:
+        run_adb(["shell", "am", "force-stop", package], adb_path)
+        time.sleep(0.5)
     success, output = run_adb([
         "shell", "monkey", "-p", package,
         "-c", "android.intent.category.LAUNCHER", "1",
