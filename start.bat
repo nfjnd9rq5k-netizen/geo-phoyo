@@ -53,7 +53,7 @@ echo   Mock location: OFF
 echo [5/6] Demarrage du proxy MITM...
 taskkill /F /IM mitmdump.exe >nul 2>&1
 timeout /t 1 /nobreak >nul
-start "MITM Proxy" /min %MITMDUMP% --listen-host 0.0.0.0 --listen-port 8888 -s "%SCRIPT_DIR%mitm_script.py" --set block_global=false
+start "MITM Proxy" /min %MITMDUMP% --listen-host 0.0.0.0 --listen-port 8888 -s "%SCRIPT_DIR%mitm_script.py" --set block_global=false --ignore-hosts "(?!.*certificall)"
 timeout /t 2 /nobreak >nul
 echo   Proxy MITM demarre (port 8888)
 
