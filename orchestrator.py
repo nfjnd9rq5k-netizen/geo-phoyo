@@ -93,8 +93,24 @@ class GeoPhotoOrchestrator:
 
     # ── Photo pipeline ──
 
+    # Pool de telephones realistes
+    DEVICE_PROFILES = [
+        {"make": b"samsung",  "model": b"SM-G991B",  "sw": b"G991BXXS7DWBA",   "focal": (6400, 1000), "focal35": 26, "fnum": (180, 100)},  # Galaxy S21
+        {"make": b"samsung",  "model": b"SM-S908B",  "sw": b"S908BXXS4CWK1",   "focal": (6400, 1000), "focal35": 23, "fnum": (180, 100)},  # Galaxy S22 Ultra
+        {"make": b"samsung",  "model": b"SM-A546B",  "sw": b"A546BXXS7CXA1",   "focal": (5400, 1000), "focal35": 26, "fnum": (180, 100)},  # Galaxy A54
+        {"make": b"samsung",  "model": b"SM-G781B",  "sw": b"G781BXXS9FWK2",   "focal": (5400, 1000), "focal35": 26, "fnum": (200, 100)},  # Galaxy S20 FE
+        {"make": b"Google",   "model": b"Pixel 7",   "sw": b"TQ3A.230901.001", "focal": (6810, 1000), "focal35": 25, "fnum": (189, 100)},  # Pixel 7
+        {"make": b"Google",   "model": b"Pixel 8",   "sw": b"AP2A.240805.005", "focal": (6810, 1000), "focal35": 26, "fnum": (173, 100)},  # Pixel 8
+        {"make": b"Xiaomi",   "model": b"2201117TG", "sw": b"V14.0.6.0.TLCMIXM","focal": (5430, 1000), "focal35": 24, "fnum": (179, 100)},  # Xiaomi 12T
+        {"make": b"Xiaomi",   "model": b"23049PCD8G","sw": b"V14.0.4.0.TMFMIXM","focal": (5770, 1000), "focal35": 24, "fnum": (179, 100)},  # Redmi Note 12 Pro
+        {"make": b"HUAWEI",   "model": b"VOG-L29",   "sw": b"VOG-L29 10.1.0",  "focal": (5580, 1000), "focal35": 27, "fnum": (180, 100)},  # P30 Pro
+        {"make": b"OnePlus",  "model": b"CPH2451",   "sw": b"CPH2451_14.0.0.3", "focal": (5590, 1000), "focal35": 25, "fnum": (188, 100)},  # OnePlus Nord CE 3
+        {"make": b"Apple",    "model": b"iPhone 14",  "sw": b"17.4",            "focal": (5700, 1000), "focal35": 26, "fnum": (156, 100)},  # iPhone 14
+        {"make": b"Apple",    "model": b"iPhone 13",  "sw": b"17.3.1",          "focal": (5100, 1000), "focal35": 26, "fnum": (156, 100)},  # iPhone 13
+    ]
+
     def _inject_camera_metadata(self, image_path):
-        """Ajoute les metadonnees camera realistes si absentes."""
+        """Ajoute les metadonnees camera realistes avec appareil aleatoire."""
         import piexif
         import random
 
@@ -106,49 +122,37 @@ class GeoPhotoOrchestrator:
         ifd0 = exif_dict.setdefault("0th", {})
         exif_ifd = exif_dict.setdefault("Exif", {})
 
-        # Make/Model Samsung Galaxy S21
-        if not ifd0.get(piexif.ImageIFD.Make):
-            ifd0[piexif.ImageIFD.Make] = b"samsung"
-        if not ifd0.get(piexif.ImageIFD.Model):
-            ifd0[piexif.ImageIFD.Model] = b"SM-G991B"
-        if not ifd0.get(piexif.ImageIFD.Software):
-            ifd0[piexif.ImageIFD.Software] = b"G991BXXS7DWBA"
+        # Choisir un appareil au hasard
+        device = random.choice(self.DEVICE_PROFILES)
+        self._log(f"Appareil: {device['make'].decode()} {device['model'].decode()}")
 
-        # Parametres camera realistes (Galaxy S21 main camera)
-        if not exif_ifd.get(piexif.ExifIFD.FocalLength):
-            exif_ifd[piexif.ExifIFD.FocalLength] = (6400, 1000)  # 6.4mm
-        if not exif_ifd.get(piexif.ExifIFD.FocalLengthIn35mmFilm):
-            exif_ifd[piexif.ExifIFD.FocalLengthIn35mmFilm] = 26
-        if not exif_ifd.get(piexif.ExifIFD.FNumber):
-            exif_ifd[piexif.ExifIFD.FNumber] = (180, 100)  # f/1.8
-        if not exif_ifd.get(piexif.ExifIFD.ISOSpeedRatings):
-            exif_ifd[piexif.ExifIFD.ISOSpeedRatings] = random.choice([50, 80, 100, 125, 160, 200, 250])
-        if not exif_ifd.get(piexif.ExifIFD.ExposureTime):
-            exif_ifd[piexif.ExifIFD.ExposureTime] = random.choice([
-                (1, 120), (1, 100), (1, 200), (1, 250), (1, 500), (1, 60)
-            ])
-        if not exif_ifd.get(piexif.ExifIFD.ExposureProgram):
-            exif_ifd[piexif.ExifIFD.ExposureProgram] = 2  # Normal
-        if not exif_ifd.get(piexif.ExifIFD.MeteringMode):
-            exif_ifd[piexif.ExifIFD.MeteringMode] = 2  # Center-weighted
-        if not exif_ifd.get(piexif.ExifIFD.Flash):
-            exif_ifd[piexif.ExifIFD.Flash] = 0  # No flash
-        if not exif_ifd.get(piexif.ExifIFD.WhiteBalance):
-            exif_ifd[piexif.ExifIFD.WhiteBalance] = 0  # Auto
-        if not exif_ifd.get(piexif.ExifIFD.ColorSpace):
-            exif_ifd[piexif.ExifIFD.ColorSpace] = 1  # sRGB
-        if not exif_ifd.get(piexif.ExifIFD.SceneCaptureType):
-            exif_ifd[piexif.ExifIFD.SceneCaptureType] = 0  # Standard
-        if not exif_ifd.get(piexif.ExifIFD.ExifVersion):
-            exif_ifd[piexif.ExifIFD.ExifVersion] = b"0232"
+        # Make/Model/Software
+        ifd0[piexif.ImageIFD.Make] = device["make"]
+        ifd0[piexif.ImageIFD.Model] = device["model"]
+        ifd0[piexif.ImageIFD.Software] = device["sw"]
+
+        # Parametres camera
+        exif_ifd[piexif.ExifIFD.FocalLength] = device["focal"]
+        exif_ifd[piexif.ExifIFD.FocalLengthIn35mmFilm] = device["focal35"]
+        exif_ifd[piexif.ExifIFD.FNumber] = device["fnum"]
+        exif_ifd[piexif.ExifIFD.ISOSpeedRatings] = random.choice([50, 80, 100, 125, 160, 200, 250, 320, 400])
+        exif_ifd[piexif.ExifIFD.ExposureTime] = random.choice([
+            (1, 60), (1, 100), (1, 120), (1, 200), (1, 250), (1, 500), (1, 1000)
+        ])
+        exif_ifd[piexif.ExifIFD.ExposureProgram] = 2
+        exif_ifd[piexif.ExifIFD.MeteringMode] = random.choice([1, 2, 5])  # Average, Center, Pattern
+        exif_ifd[piexif.ExifIFD.Flash] = 0
+        exif_ifd[piexif.ExifIFD.WhiteBalance] = 0
+        exif_ifd[piexif.ExifIFD.ColorSpace] = 1
+        exif_ifd[piexif.ExifIFD.SceneCaptureType] = 0
+        exif_ifd[piexif.ExifIFD.ExifVersion] = b"0232"
 
         # SubSecTime realiste
         subsec = str(random.randint(100, 999)).encode()
         for tag in [piexif.ExifIFD.SubSecTime, piexif.ExifIFD.SubSecTimeOriginal, piexif.ExifIFD.SubSecTimeDigitized]:
-            if not exif_ifd.get(tag):
-                exif_ifd[tag] = subsec
+            exif_ifd[tag] = subsec
 
-        # Image dimensions
+        # Dimensions
         try:
             from PIL import Image
             img = Image.open(image_path)
@@ -160,7 +164,6 @@ class GeoPhotoOrchestrator:
         except Exception:
             pass
 
-        # YCbCrPositioning (standard pour photos camera)
         ifd0[piexif.ImageIFD.YCbCrPositioning] = 1
 
         try:
