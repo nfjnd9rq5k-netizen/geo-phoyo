@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+output/
+*.apk
+*.xapk
+frida-server-x86_64
+frida-gadget*.so
+debug.keystore
+apktool.jar
+.claude/

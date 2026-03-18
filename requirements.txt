@@ -1,0 +1,6 @@
+piexif
+pytz
+timezonefinder
+frida-tools
+geopy
+Pillow
