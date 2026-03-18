@@ -188,7 +188,7 @@ class GeoPhotoOrchestrator:
             lon = self.state["lon"]
             alt = self.state["altitude"]
 
-        # Injecter les metadonnees camera AVANT geo.py (pour qu'il les preserve)
+        # Injecter les metadonnees camera AVANT geo.py
         self._inject_camera_metadata(input_path)
 
         try:
@@ -197,6 +197,9 @@ class GeoPhotoOrchestrator:
         except Exception as e:
             self._log(f"Erreur geo.py: {e}")
             return False, str(e)
+
+        # Re-injecter apres geo.py (il nettoie Software)
+        self._inject_camera_metadata(input_path)
 
         # Sauvegarder dans output/
         output_path = os.path.join(OUTPUT_DIR, filename)
