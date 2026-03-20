@@ -107,14 +107,16 @@ def run(cmd, timeout=120):
         cmd, capture_output=True, text=True, timeout=timeout,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
+    combined = (result.stdout or "") + (result.stderr or "")
     if result.returncode != 0 and result.stderr:
         print(f"  ERREUR: {result.stderr[:200]}")
-    return result.returncode == 0, result.stdout.strip()
+    return result.returncode == 0, result.stdout.strip(), result.stderr.strip()
 
 
 def adb_install(adb, apk_path, timeout=180, retries=3):
     """Install APK via ADB with retries and server restart on failure."""
     import time
+    last_err = ""
     for attempt in range(retries):
         if attempt > 0:
             print(f"  Tentative {attempt + 1}/{retries}...")
@@ -123,19 +125,26 @@ def adb_install(adb, apk_path, timeout=180, retries=3):
             time.sleep(2)
             run([adb, "start-server"], timeout=10)
             time.sleep(3)
-            # Wait for device to reconnect
+            # Reconnect explicitly
+            run([adb, "connect", "localhost:5555"], timeout=10)
+            time.sleep(2)
+            # Wait for device
             for _ in range(10):
-                ok, out = run([adb, "devices"], timeout=10)
-                if ok and "device" in out and "emulator" in out:
+                ok, out, _ = run([adb, "devices"], timeout=10)
+                if ok and "device" in out:
                     break
                 time.sleep(1)
-        ok, out = run([adb, "install", apk_path], timeout=timeout)
+        ok, out, err = run([adb, "install", apk_path], timeout=timeout)
+        last_err = err
         if ok:
             return True, out
-        if "closed" not in (out or "") and "closed" not in str(ok):
-            # Real error, not a connection issue
-            return False, out
-    return False, out
+        # Always retry if connection error
+        if "closed" in err or "closed" in out:
+            print(f"  Connexion perdue, retry...")
+            continue
+        # Real error, not a connection issue - stop retrying
+        return False, out
+    return False, last_err
 
 
 def main():
@@ -231,7 +240,7 @@ def main():
             return False
 
         # Decompiler
-        ok, _ = run([java, "-jar", apktool, "d", "-f", "-o", decompiled, base_apk], timeout=300)
+        ok, _, _ = run([java, "-jar", apktool, "d", "-f", "-o", decompiled, base_apk], timeout=300)
         if not ok:
             print("  ERREUR: Decompilation echouee")
             return False
@@ -402,7 +411,7 @@ def main():
     keystore = os.path.join(SCRIPT_DIR, "debug.keystore")
 
     # Build
-    ok, _ = run([java, "-jar", apktool, "b", "-o", unsigned, decompiled], timeout=300)
+    ok, _, _ = run([java, "-jar", apktool, "b", "-o", unsigned, decompiled], timeout=300)
     if not ok:
         print("  ERREUR: Build echoue")
         return False
@@ -448,7 +457,7 @@ def main():
     time.sleep(3)
 
     # Verifier connexion
-    ok, out = run([adb, "devices"])
+    ok, out, _ = run([adb, "devices"])
     if "device" not in out:
         print("  ERREUR: BlueStacks non connecte!")
         print("  Lancez BlueStacks et reessayez.")
@@ -456,7 +465,7 @@ def main():
     print("  BlueStacks connecte")
 
     # Installer pict2cam
-    ok, out = run([adb, "shell", "pm", "list", "packages", "com.adriangl.pict2cam"])
+    ok, out, _ = run([adb, "shell", "pm", "list", "packages", "com.adriangl.pict2cam"])
     if "pict2cam" not in (out or ""):
         pict2cam_apk = os.path.join(WORK_DIR, "pict2cam.apk")
         if not os.path.exists(pict2cam_apk):
