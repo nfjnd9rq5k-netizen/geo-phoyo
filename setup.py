@@ -112,6 +112,32 @@ def run(cmd, timeout=120):
     return result.returncode == 0, result.stdout.strip()
 
 
+def adb_install(adb, apk_path, timeout=180, retries=3):
+    """Install APK via ADB with retries and server restart on failure."""
+    import time
+    for attempt in range(retries):
+        if attempt > 0:
+            print(f"  Tentative {attempt + 1}/{retries}...")
+            # Restart ADB server to fix broken connections
+            run([adb, "kill-server"], timeout=10)
+            time.sleep(2)
+            run([adb, "start-server"], timeout=10)
+            time.sleep(3)
+            # Wait for device to reconnect
+            for _ in range(10):
+                ok, out = run([adb, "devices"], timeout=10)
+                if ok and "device" in out and "emulator" in out:
+                    break
+                time.sleep(1)
+        ok, out = run([adb, "install", apk_path], timeout=timeout)
+        if ok:
+            return True, out
+        if "closed" not in (out or "") and "closed" not in str(ok):
+            # Real error, not a connection issue
+            return False, out
+    return False, out
+
+
 def main():
     print("=" * 55)
     print("  GEO PHOTO v3 — Setup automatique")
@@ -413,12 +439,21 @@ def main():
     # ── 9. Installer sur BlueStacks ──
     print("\n[9/10] Installation sur BlueStacks...")
 
+    # Restart ADB server pour eviter les "error: closed"
+    import time
+    print("  Redemarrage ADB...")
+    run([adb, "kill-server"], timeout=10)
+    time.sleep(2)
+    run([adb, "start-server"], timeout=10)
+    time.sleep(3)
+
     # Verifier connexion
     ok, out = run([adb, "devices"])
     if "device" not in out:
         print("  ERREUR: BlueStacks non connecte!")
         print("  Lancez BlueStacks et reessayez.")
         return False
+    print("  BlueStacks connecte")
 
     # Installer pict2cam
     ok, out = run([adb, "shell", "pm", "list", "packages", "com.adriangl.pict2cam"])
@@ -426,8 +461,11 @@ def main():
         pict2cam_apk = os.path.join(WORK_DIR, "pict2cam.apk")
         if not os.path.exists(pict2cam_apk):
             download(PICT2CAM_URL, pict2cam_apk, "pict2cam")
-        run([adb, "install", pict2cam_apk], timeout=60)
-        print("  pict2cam installe")
+        ok, _ = adb_install(adb, pict2cam_apk, timeout=60)
+        if ok:
+            print("  pict2cam installe")
+        else:
+            print("  ERREUR: pict2cam install echoue, continuons quand meme...")
         print("  >>> IMPORTANT: Allez dans Parametres Android > Apps par defaut > Camera > Pict2Cam")
     else:
         print("  pict2cam deja installe")
@@ -436,7 +474,7 @@ def main():
     run([adb, "shell", "pm", "uninstall", "app.certificall"])
 
     # Installer le patche
-    ok, out = run([adb, "install", output], timeout=180)
+    ok, out = adb_install(adb, output, timeout=180)
     if ok:
         print("  Certificall patche installe!")
     else:
