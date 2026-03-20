@@ -348,8 +348,18 @@ def main():
     # Generer le cert mitmproxy si necessaire
     mitmdump = shutil.which("mitmdump")
     if not mitmdump:
-        mitmdump = os.path.join(os.environ.get("LOCALAPPDATA", ""),
-                                "Python", "pythoncore-3.14-64", "Scripts", "mitmdump.exe")
+        candidates = [
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), "Python", "pythoncore-3.14-64", "Scripts", "mitmdump.exe"),
+            os.path.join(os.environ.get("ProgramFiles", ""), "mitmproxy", "bin", "mitmdump.exe"),
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Python", "Python313", "Scripts", "mitmdump.exe"),
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Python", "Python312", "Scripts", "mitmdump.exe"),
+        ]
+        for c in candidates:
+            if os.path.exists(c):
+                mitmdump = c
+                break
+    if not mitmdump:
+        mitmdump = "mitmdump"
     mitmproxy_cert = os.path.join(os.path.expanduser("~"), ".mitmproxy", "mitmproxy-ca-cert.pem")
     if not os.path.exists(mitmproxy_cert):
         print("  Generation du certificat mitmproxy...")

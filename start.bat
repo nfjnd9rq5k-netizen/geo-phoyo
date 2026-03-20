@@ -7,8 +7,21 @@ echo ===================================================
 echo.
 
 set ADB="C:\Program Files\BlueStacks_nxt\HD-Adb.exe"
-set MITMDUMP="%LOCALAPPDATA%\Python\pythoncore-3.14-64\Scripts\mitmdump.exe"
 set SCRIPT_DIR=%~dp0
+
+:: Chercher mitmdump dans plusieurs emplacements
+set MITMDUMP=
+where mitmdump.exe >nul 2>&1 && for /f "delims=" %%i in ('where mitmdump.exe') do set MITMDUMP="%%i"
+if not defined MITMDUMP if exist "%LOCALAPPDATA%\Python\pythoncore-3.14-64\Scripts\mitmdump.exe" set MITMDUMP="%LOCALAPPDATA%\Python\pythoncore-3.14-64\Scripts\mitmdump.exe"
+if not defined MITMDUMP if exist "%ProgramFiles%\mitmproxy\bin\mitmdump.exe" set MITMDUMP="%ProgramFiles%\mitmproxy\bin\mitmdump.exe"
+if not defined MITMDUMP if exist "%LOCALAPPDATA%\Programs\Python\Python313\Scripts\mitmdump.exe" set MITMDUMP="%LOCALAPPDATA%\Programs\Python\Python313\Scripts\mitmdump.exe"
+if not defined MITMDUMP if exist "%LOCALAPPDATA%\Programs\Python\Python312\Scripts\mitmdump.exe" set MITMDUMP="%LOCALAPPDATA%\Programs\Python\Python312\Scripts\mitmdump.exe"
+if not defined MITMDUMP (
+    echo   ERREUR: mitmdump.exe non trouve!
+    echo   Installez mitmproxy: pip install mitmproxy
+    pause
+    exit /b 1
+)
 
 :: 1. Tout arreter proprement
 echo [1/6] Nettoyage...
