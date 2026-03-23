@@ -37,6 +37,7 @@ class GeoPhotoOrchestrator:
             "last_photo": None,
         }
         self.state_lock = threading.Lock()
+        self.current_device = None  # Profil camera persistant par session
 
     def _log(self, msg):
         """Ajoute un message au log interne."""
@@ -129,8 +130,10 @@ class GeoPhotoOrchestrator:
         ifd0 = exif_dict.setdefault("0th", {})
         exif_ifd = exif_dict.setdefault("Exif", {})
 
-        # Choisir un appareil au hasard
-        device = random.choice(self.DEVICE_PROFILES)
+        # Utiliser le meme appareil pour toute la session
+        if self.current_device is None:
+            self.current_device = random.choice(self.DEVICE_PROFILES)
+        device = self.current_device
         self._log(f"Appareil: {device['make'].decode()} {device['model'].decode()}")
 
         # Make/Model/Software
