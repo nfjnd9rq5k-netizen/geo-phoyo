@@ -482,11 +482,22 @@ def main():
     run([adb, "kill-server"], timeout=10)
     time.sleep(2)
     run([adb, "start-server"], timeout=10)
-    time.sleep(3)
+    time.sleep(2)
+    run([adb, "connect", "localhost:5555"], timeout=10)
+    time.sleep(2)
 
-    # Verifier connexion
-    ok, out, _ = run([adb, "devices"])
-    if "device" not in out:
+    # Attendre que BlueStacks soit vraiment connecte
+    connected = False
+    for attempt in range(15):
+        ok, out, _ = run([adb, "devices"], timeout=10)
+        if ok and "device" in out and "offline" not in out:
+            # Verifier que ADB repond vraiment
+            ok2, _, _ = run([adb, "shell", "echo ok"], timeout=10)
+            if ok2:
+                connected = True
+                break
+        time.sleep(2)
+    if not connected:
         print("  ERREUR: BlueStacks non connecte!")
         print("  Lancez BlueStacks et reessayez.")
         return False
