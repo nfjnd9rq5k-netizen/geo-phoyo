@@ -4,7 +4,14 @@ Modifie les reponses 401/403 en 200 OK.
 """
 
 import json
-from mitmproxy import http, ctx
+from mitmproxy import http, ctx, tls
+
+
+def tls_clienthello(data: tls.ClientHelloData):
+    """Ignore (passthrough) les connexions TLS non-certificall pour ne pas bloquer internet."""
+    host = data.context.server.address[0] if data.context.server.address else ""
+    if "certificall" not in host.lower():
+        data.ignore_connection = True
 
 
 def request(flow: http.HTTPFlow) -> None:
