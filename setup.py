@@ -39,7 +39,11 @@ ADB_CANDIDATES = [
 # URLs
 APKTOOL_URL = "https://github.com/iBotPeaches/Apktool/releases/download/v2.9.3/apktool_2.9.3.jar"
 PICT2CAM_URL = "https://github.com/adriangl/pict2cam/releases/download/1.0.70/pict2cam-1.0.70-release.apk"
-CERTIFICALL_XAPK_URL = "https://d.apkpure.net/b/XAPK/app.certificall?version=latest"
+CERTIFICALL_XAPK_URLS = [
+    "https://d.apkpure.net/b/XAPK/app.certificall?version=latest",
+    "https://d.apkpure.com/b/XAPK/app.certificall?version=latest",
+    "https://download.apkcombo.com/app.certificall/",
+]
 
 
 def find_java():
@@ -82,7 +86,9 @@ def find_build_tools():
 def download(url, dest, desc=""):
     print(f"  Telechargement {desc or os.path.basename(dest)}...")
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        })
         with urllib.request.urlopen(req, timeout=120) as r, open(dest, 'wb') as f:
             total = int(r.headers.get('content-length', 0))
             downloaded = 0
@@ -100,6 +106,18 @@ def download(url, dest, desc=""):
     except Exception as e:
         print(f"  ERREUR: {e}")
         return False
+
+
+def download_with_fallback(urls, dest, desc=""):
+    """Essaie plusieurs URLs jusqu'a ce qu'une fonctionne."""
+    for i, url in enumerate(urls):
+        print(f"  Tentative {i + 1}/{len(urls)}: {url[:60]}...")
+        if download(url, dest, desc):
+            return True
+        # Supprimer le fichier partiel
+        if os.path.exists(dest):
+            os.remove(dest)
+    return False
 
 
 def run(cmd, timeout=120):
@@ -203,8 +221,8 @@ def main():
     xapk_path = os.path.join(WORK_DIR, "certificall.xapk")
     if not os.path.exists(xapk_path):
         print("\n[4/10] Telechargement Certificall XAPK...")
-        if not download(CERTIFICALL_XAPK_URL, xapk_path, "Certificall XAPK"):
-            print("  Telechargement auto echoue.")
+        if not download_with_fallback(CERTIFICALL_XAPK_URLS, xapk_path, "Certificall XAPK"):
+            print("  Tous les telechargements ont echoue.")
             print("  Telechargez manuellement depuis apkpure.com ou apkcombo.com")
             print(f"  et placez le fichier dans: {xapk_path}")
             return False
