@@ -1,6 +1,6 @@
 """
 MITM Proxy Script — Intercepte le trafic Certificall.
-Modifie les reponses 401/403 en 200 OK avec des donnees coherentes.
+Bypass 403 UNIQUEMENT sur updateOrCreate (pas sur auth/login).
 """
 
 import json
@@ -9,7 +9,12 @@ import time
 import hashlib
 from mitmproxy import http, ctx, tls
 
-# Cache des items crees: cle = hash du body -> response coherente
+# Paths a bypasser en 401/403
+BYPASS_PATHS = [
+    "/v5/certificall/items/updateOrCreate",
+]
+
+# Cache des items crees
 _item_cache = {}
 _item_counter = 10000
 _last_case_id = None
@@ -23,7 +28,6 @@ def tls_clienthello(data: tls.ClientHelloData):
 
 
 def _extract_case_id(content):
-    """Essaie d'extraire le caseId du body (JSON ou multipart binaire)."""
     if not content:
         return None
     try:
@@ -43,13 +47,12 @@ def _extract_case_id(content):
 
 
 def _extract_all_fields(content):
-    """Extrait tous les champs reconnaissables du body."""
     fields = {}
     if not content:
         return fields
     try:
         text = content.decode("utf-8", errors="ignore")
-        for field in ["caseId", "stepId", "itemId", "multiStepPos", "position", "type", "status"]:
+        for field in ["caseId", "stepId", "itemId", "multiStepPos", "position", "type"]:
             match = re.search(rf'"{field}"\s*:\s*("?[\w.-]+"?)', text)
             if match:
                 val = match.group(1).strip('"')
@@ -63,10 +66,17 @@ def _extract_all_fields(content):
 
 
 def _get_body_key(content):
-    """Genere une cle stable pour le cache basee sur le contenu."""
     if not content:
         return "empty"
     return hashlib.md5(content[:1024]).hexdigest()
+
+
+def _should_bypass(path):
+    """Verifie si ce path doit etre bypasse en 401/403."""
+    for bp in BYPASS_PATHS:
+        if bp in path:
+            return True
+    return False
 
 
 def request(flow: http.HTTPFlow) -> None:
@@ -74,12 +84,30 @@ def request(flow: http.HTTPFlow) -> None:
     host = flow.request.pretty_host.lower()
     if "certificall" not in host:
         return
-    ctx.log.warn(f"[REQ] {flow.request.method} {flow.request.path}")
 
-    if flow.request.method == "POST" and flow.request.content:
+    path = flow.request.path
+    method = flow.request.method
+    ctx.log.warn(f"[REQ] {method} {path}")
+
+    if method == "POST" and flow.request.content:
         case_id = _extract_case_id(flow.request.content)
         if case_id:
             _last_case_id = case_id
+
+        # Log le body pour les endpoints importants (pas logger/message)
+        if "logger/message" not in path:
+            ct = flow.request.headers.get("content-type", "")
+            if "json" in ct.lower():
+                try:
+                    body = flow.request.content.decode("utf-8", errors="ignore")
+                    if len(body) > 2000:
+                        body = body[:2000] + "...[TRONQUE]"
+                    ctx.log.warn(f"[REQ BODY] {body}")
+                except Exception:
+                    pass
+            elif "multipart" in ct.lower():
+                fields = _extract_all_fields(flow.request.content)
+                ctx.log.warn(f"[REQ MULTIPART] fields={json.dumps(fields)}, size={len(flow.request.content)}b")
 
 
 def response(flow: http.HTTPFlow) -> None:
@@ -94,7 +122,18 @@ def response(flow: http.HTTPFlow) -> None:
 
     ctx.log.warn(f"[RESP] {status} {method} {path}")
 
-    if status in (401, 403):
+    # Log response body pour les endpoints importants (pas logger/message)
+    if flow.response.content and "logger/message" not in path:
+        try:
+            body = flow.response.content.decode("utf-8", errors="ignore")
+            if len(body) > 2000:
+                body = body[:2000] + "...[TRONQUE]"
+            ctx.log.warn(f"[RESP BODY] {body}")
+        except Exception:
+            pass
+
+    # BYPASS 401/403 UNIQUEMENT sur updateOrCreate
+    if status in (401, 403) and _should_bypass(path):
         body_key = _get_body_key(flow.request.content)
         if body_key in _item_cache:
             item_id = _item_cache[body_key]
@@ -122,13 +161,17 @@ def response(flow: http.HTTPFlow) -> None:
             if key in fields:
                 fake_body[key] = fields[key]
 
+        ctx.log.error(f"[BYPASS] Fake: {json.dumps(fake_body)}")
         flow.response.status_code = 200
         flow.response.headers["content-type"] = "application/json"
         flow.response.content = json.dumps(fake_body).encode()
 
+    elif status in (401, 403):
+        # Log les 401/403 NON-bypasses pour info
+        ctx.log.warn(f"[AUTH] {status} {method} {path} (non bypasse, auth flow normal)")
+
     elif "trust-services" in path and status >= 400:
         ctx.log.error(f"[BYPASS] {status} -> 200 | {method} {path} (trust-services)")
-
         fake_analysis = {
             "success": True,
             "status": "COMPLETED",
@@ -136,7 +179,6 @@ def response(flow: http.HTTPFlow) -> None:
             "message": "OK",
             "analysisId": f"analysis-{int(time.time())}",
         }
-
         flow.response.status_code = 200
         flow.response.headers["content-type"] = "application/json"
         flow.response.content = json.dumps(fake_analysis).encode()
