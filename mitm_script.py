@@ -4,7 +4,11 @@ Modifie les reponses 401/403 en 200 OK.
 """
 
 import json
+import random
 from mitmproxy import http, ctx, tls
+
+# Compteur unique pour chaque item cree
+_item_counter = random.randint(10000, 99999)
 
 
 def tls_clienthello(data: tls.ClientHelloData):
@@ -38,10 +42,13 @@ def response(flow: http.HTTPFlow) -> None:
         except Exception:
             body = ""
 
-        ctx.log.error(f"[BYPASS] {status} -> 200 | {method} {path}")
+        global _item_counter
+        _item_counter += 1
+
+        ctx.log.error(f"[BYPASS] {status} -> 200 | {method} {path} (id={_item_counter})")
 
         fake_body = {
-            "id": 999,
+            "id": _item_counter,
             "caseId": 1,
             "status": "COMPLETED",
             "success": True,
