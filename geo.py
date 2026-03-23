@@ -860,8 +860,7 @@ def modify_geolocation(input_path, latitude, longitude, altitude=None, output_pa
 
     # Verifier que c'est bien un JPEG
     if jpeg_bytes[:2] != b'\xFF\xD8':
-        print(f"  ERREUR : {input_path} n'est pas un fichier JPEG valide")
-        sys.exit(1)
+        raise ValueError(f"{input_path} n'est pas un fichier JPEG valide")
 
     # ── Etape 2 : Charger l'EXIF ──
     try:

@@ -248,7 +248,7 @@ dropZone.addEventListener('drop', function(e) {
 });
 dropZone.addEventListener('click', function() {
     var inp = document.createElement('input');
-    inp.type = 'file'; inp.accept = 'image/*'; inp.multiple = true;
+    inp.type = 'file'; inp.accept = 'image/jpeg,image/png,image/webp'; inp.multiple = true;
     inp.onchange = function() { for (var i = 0; i < inp.files.length; i++) uploadPhoto(inp.files[i]); };
     inp.click();
 });
@@ -257,19 +257,19 @@ function uploadPhoto(file) {
     dropZone.textContent = 'Upload: ' + file.name + '...';
     dropZone.className = 'drop-zone uploading';
     fetch('/api/photo', { method: 'POST', headers: {'X-Filename': file.name}, body: file })
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-        if (data.ok) {
+    .then(function(r) { return r.json().then(function(data) { return {status: r.status, data: data}; }); })
+    .then(function(res) {
+        if (res.data.ok) {
             dropZone.textContent = file.name + ' - OK';
             dropZone.className = 'drop-zone success';
         } else {
-            dropZone.textContent = 'Erreur: ' + (data.error || 'inconnu');
+            dropZone.textContent = 'Erreur: ' + (res.data.error || 'erreur ' + res.status);
             dropZone.className = 'drop-zone error';
         }
         setTimeout(function() { dropZone.textContent = 'Glisser une photo ici'; dropZone.className = 'drop-zone'; }, 4000);
     })
-    .catch(function() {
-        dropZone.textContent = 'Erreur reseau';
+    .catch(function(err) {
+        dropZone.textContent = 'Erreur reseau: ' + (err.message || 'serveur injoignable');
         dropZone.className = 'drop-zone error';
         setTimeout(function() { dropZone.textContent = 'Glisser une photo ici'; dropZone.className = 'drop-zone'; }, 4000);
     });

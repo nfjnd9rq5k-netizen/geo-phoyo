@@ -179,6 +179,36 @@ class GeoPhotoOrchestrator:
         except Exception:
             pass
 
+    def _convert_to_jpeg(self, input_path, filename):
+        """Convertit une image non-JPEG en JPEG. Retourne (nouveau_path, nouveau_filename) ou None si deja JPEG."""
+        from PIL import Image
+
+        with open(input_path, 'rb') as f:
+            header = f.read(8)
+
+        # Deja un JPEG
+        if header[:2] == b'\xFF\xD8':
+            return None
+
+        self._log(f"Conversion en JPEG: {filename}")
+        img = Image.open(input_path)
+        if img.mode in ('RGBA', 'P', 'LA'):
+            img = img.convert('RGB')
+
+        # Nouveau nom avec .jpg
+        base = os.path.splitext(filename)[0]
+        new_filename = base + ".jpg"
+        new_path = os.path.splitext(input_path)[0] + ".jpg"
+
+        img.save(new_path, "JPEG", quality=95)
+        img.close()
+
+        # Supprimer l'original si different
+        if new_path != input_path and os.path.exists(input_path):
+            os.remove(input_path)
+
+        return new_path, new_filename
+
     def process_photo(self, input_path, filename):
         """Modifie EXIF + push vers BlueStacks. Retourne (success, message)."""
         os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -187,6 +217,15 @@ class GeoPhotoOrchestrator:
             lat = self.state["lat"]
             lon = self.state["lon"]
             alt = self.state["altitude"]
+
+        # Convertir en JPEG si necessaire (PNG, WebP, etc.)
+        try:
+            result = self._convert_to_jpeg(input_path, filename)
+            if result:
+                input_path, filename = result
+        except Exception as e:
+            self._log(f"Erreur conversion: {e}")
+            return False, f"Format image non supporte: {e}"
 
         # Injecter les metadonnees camera AVANT geo.py
         self._inject_camera_metadata(input_path)
