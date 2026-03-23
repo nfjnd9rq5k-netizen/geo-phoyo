@@ -318,7 +318,7 @@ def main():
             patches_applied += 1
             print("  Patch: isDeveloperModeEnabled() -> false")
 
-    # Patch JS: integrity checks
+    # Patch JS: integrity checks + sync errors
     js_dir = os.path.join(decompiled, "assets", "public")
     main_js = None
     for f in os.listdir(js_dir):
@@ -326,27 +326,56 @@ def main():
             main_js = os.path.join(js_dir, f)
             break
 
+    def replace_js_method(js_code, method_name, new_body):
+        """Remplace le body d'une methode JS par brace-counting (version-independant)."""
+        idx = js_code.find(method_name + '(')
+        if idx == -1:
+            return js_code, False
+        # Trouver le { d'ouverture du body
+        brace_start = js_code.find('{', idx)
+        if brace_start == -1:
+            return js_code, False
+        # Compter les accolades pour trouver le } de fermeture
+        depth = 1
+        i = brace_start + 1
+        while i < len(js_code) and depth > 0:
+            if js_code[i] == '{':
+                depth += 1
+            elif js_code[i] == '}':
+                depth -= 1
+            i += 1
+        if depth != 0:
+            return js_code, False
+        # Extraire les params originaux
+        params_start = idx + len(method_name)
+        params_end = js_code.find(')', params_start) + 1
+        params = js_code[params_start:params_end]
+        # Remplacer
+        old_method = js_code[idx:i]
+        new_method = method_name + params + '{' + new_body + '}'
+        return js_code.replace(old_method, new_method, 1), True
+
     if main_js:
         with open(main_js, 'r', encoding='utf-8', errors='ignore') as f:
             js = f.read()
 
-        # Patch: isIntegrityError -> false
-        old = 'isIntegrityError(d){return!(!d||!d.error)&&("errorType"in d.error&&"blockAction"in d.error&&(401===d.status||403===d.status))}'
-        if old in js:
-            js = js.replace(old, 'isIntegrityError(d){return!1}')
+        # Patch: isIntegrityError -> false (brace-counting, version-independant)
+        js, ok = replace_js_method(js, 'isIntegrityError', 'return!1')
+        if ok:
             patches_applied += 1
             print("  Patch JS: isIntegrityError -> false")
 
-        # Patch: standalone Hs() -> false
-        hs_pattern = re.compile(r'function Hs\(L\)\{return console\.log\("isIntegrityError"[^}]+\}')
+        # Patch: standalone isIntegrityError function (variantes)
+        hs_pattern = re.compile(r'function \w+\(\w+\)\{return console\.log\("isIntegrityError"[^}]+\}')
         if hs_pattern.search(js):
-            js = hs_pattern.sub('function Hs(L){return!1}', js)
+            js = hs_pattern.sub('function _bypass(x){return!1}', js)
             patches_applied += 1
-            print("  Patch JS: Hs() -> false")
+            print("  Patch JS: isIntegrityError standalone -> false")
 
-        # Patch: checkVirtualDevice
-        if 'if(o0.deviceInfos.isVirtual)' in js:
-            js = js.replace('if(o0.deviceInfos.isVirtual)', 'if(false)')
+        # Patch: checkVirtualDevice (cherche deviceInfos.isVirtual quel que soit le nom de variable)
+        virt_pattern = re.compile(r'if\(\w+\.deviceInfos\.isVirtual\)')
+        if virt_pattern.search(js):
+            js = virt_pattern.sub('if(false)', js)
             patches_applied += 1
             print("  Patch JS: checkVirtualDevice -> disabled")
 
@@ -358,16 +387,14 @@ def main():
             print("  Patch JS: token_generation_failed -> ok")
 
         # Patch: handleCaseItemError -> silencer les erreurs de sync item
-        old_item_err = 'handleCaseItemError(j,y0){this.alertService.sendAlertError("ApiAlertError"===y0.name?y0:{name:"SYNC_ERR",message:this.translocoService.translateObject("certificall.sync.itemError")}),console.error(`Error creating item ${j.stepAction}:`,y0),j.status=b.cV.Failed,j.error=y0}'
-        if old_item_err in js:
-            js = js.replace(old_item_err, 'handleCaseItemError(j,y0){console.log("sync item ok")}')
+        js, ok = replace_js_method(js, 'handleCaseItemError', 'console.log("sync ok")')
+        if ok:
             patches_applied += 1
             print("  Patch JS: handleCaseItemError -> silent success")
 
         # Patch: handleCaseError -> silencer les erreurs de sync case
-        old_case_err = 'handleCaseError(j,y0){console.error(`Error creating case ${j.title}:`,y0),this.alertService.sendAlertError({name:"SYNC_ERR",message:this.translocoService.translateObject("certificall.sync.caseError")+" : "+j.title+" - "+y0}),j.status=b.VV.Failed,j.error=y0}'
-        if old_case_err in js:
-            js = js.replace(old_case_err, 'handleCaseError(j,y0){console.log("sync case ok")}')
+        js, ok = replace_js_method(js, 'handleCaseError', 'console.log("sync ok")')
+        if ok:
             patches_applied += 1
             print("  Patch JS: handleCaseError -> silent success")
 
