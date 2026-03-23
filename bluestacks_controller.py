@@ -105,9 +105,8 @@ def push_photo(local_path, adb_path=None):
     if not success:
         return False, f"Echec push: {output}"
     run_adb([
-        "shell", "am", "broadcast",
-        "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE",
-        "-d", f"file://{remote_path}",
+        "shell",
+        f"am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d 'file://{remote_path}'"
     ], adb_path)
     return True, f"Photo poussee: {remote_path}"
 
