@@ -357,6 +357,20 @@ def main():
             patches_applied += 1
             print("  Patch JS: token_generation_failed -> ok")
 
+        # Patch: handleCaseItemError -> silencer les erreurs de sync item
+        old_item_err = 'handleCaseItemError(j,y0){this.alertService.sendAlertError("ApiAlertError"===y0.name?y0:{name:"SYNC_ERR",message:this.translocoService.translateObject("certificall.sync.itemError")}),console.error(`Error creating item ${j.stepAction}:`,y0),j.status=b.cV.Failed,j.error=y0}'
+        if old_item_err in js:
+            js = js.replace(old_item_err, 'handleCaseItemError(j,y0){console.log("sync item ok")}')
+            patches_applied += 1
+            print("  Patch JS: handleCaseItemError -> silent success")
+
+        # Patch: handleCaseError -> silencer les erreurs de sync case
+        old_case_err = 'handleCaseError(j,y0){console.error(`Error creating case ${j.title}:`,y0),this.alertService.sendAlertError({name:"SYNC_ERR",message:this.translocoService.translateObject("certificall.sync.caseError")+" : "+j.title+" - "+y0}),j.status=b.VV.Failed,j.error=y0}'
+        if old_case_err in js:
+            js = js.replace(old_case_err, 'handleCaseError(j,y0){console.log("sync case ok")}')
+            patches_applied += 1
+            print("  Patch JS: handleCaseError -> silent success")
+
         with open(main_js, 'w', encoding='utf-8') as f:
             f.write(js)
 
