@@ -52,5 +52,19 @@ def response(flow: http.HTTPFlow) -> None:
         flow.response.headers["content-type"] = "application/json"
         flow.response.content = json.dumps(fake_body).encode()
 
+    elif "trust-services" in path and status >= 400:
+        ctx.log.error(f"[BYPASS] {status} -> 200 | {method} {path} (trust-services)")
+
+        fake_analysis = {
+            "success": True,
+            "status": "COMPLETED",
+            "trustScore": 100,
+            "message": "OK"
+        }
+
+        flow.response.status_code = 200
+        flow.response.headers["content-type"] = "application/json"
+        flow.response.content = json.dumps(fake_analysis).encode()
+
     elif status >= 400:
         ctx.log.error(f"[ERROR] {status} {method} {path}")
