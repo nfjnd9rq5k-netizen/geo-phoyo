@@ -327,33 +327,47 @@ def main():
             break
 
     def replace_js_method(js_code, method_name, new_body):
-        """Remplace le body d'une methode JS par brace-counting (version-independant)."""
-        idx = js_code.find(method_name + '(')
-        if idx == -1:
-            return js_code, False
-        # Trouver le { d'ouverture du body
-        brace_start = js_code.find('{', idx)
-        if brace_start == -1:
-            return js_code, False
-        # Compter les accolades pour trouver le } de fermeture
-        depth = 1
-        i = brace_start + 1
-        while i < len(js_code) and depth > 0:
-            if js_code[i] == '{':
-                depth += 1
-            elif js_code[i] == '}':
-                depth -= 1
-            i += 1
-        if depth != 0:
-            return js_code, False
-        # Extraire les params originaux
-        params_start = idx + len(method_name)
-        params_end = js_code.find(')', params_start) + 1
-        params = js_code[params_start:params_end]
-        # Remplacer
-        old_method = js_code[idx:i]
-        new_method = method_name + params + '{' + new_body + '}'
-        return js_code.replace(old_method, new_method, 1), True
+        """Remplace le body d'une methode JS par brace-counting (version-independant).
+        Distingue les DEFINITIONS (method(){...}) des APPELS (this.method(x))."""
+        search_from = 0
+        while True:
+            idx = js_code.find(method_name + '(', search_from)
+            if idx == -1:
+                return js_code, False
+            # Trouver la ) fermante des params
+            paren_depth = 1
+            p = idx + len(method_name) + 1  # apres le (
+            while p < len(js_code) and paren_depth > 0:
+                if js_code[p] == '(':
+                    paren_depth += 1
+                elif js_code[p] == ')':
+                    paren_depth -= 1
+                p += 1
+            if paren_depth != 0:
+                search_from = idx + 1
+                continue
+            # Verifier que le caractere suivant est { (= definition, pas appel)
+            if p >= len(js_code) or js_code[p] != '{':
+                search_from = idx + 1
+                continue
+            # C'est une definition ! Compter les accolades du body
+            brace_start = p
+            depth = 1
+            i = brace_start + 1
+            while i < len(js_code) and depth > 0:
+                if js_code[i] == '{':
+                    depth += 1
+                elif js_code[i] == '}':
+                    depth -= 1
+                i += 1
+            if depth != 0:
+                search_from = idx + 1
+                continue
+            # Extraire les params originaux
+            params = js_code[idx + len(method_name):p]  # (params)
+            old_method = js_code[idx:i]
+            new_method = method_name + params + '{' + new_body + '}'
+            return js_code.replace(old_method, new_method, 1), True
 
     if main_js:
         with open(main_js, 'r', encoding='utf-8', errors='ignore') as f:
