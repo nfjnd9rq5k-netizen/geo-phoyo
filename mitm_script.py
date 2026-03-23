@@ -150,12 +150,15 @@ def response(flow: http.HTTPFlow) -> None:
 
         fake_body = {
             "id": item_id,
+            "itemId": item_id,
             "caseId": case_id,
             "status": "COMPLETED",
             "success": True,
             "message": "OK",
             "createdAt": now,
             "updatedAt": now,
+            "imageUrl": f"https://admin.certificall.app/storage/items/{item_id}.jpg",
+            "closed": True,
         }
         for key in ["stepId", "multiStepPos", "position", "type"]:
             if key in fields:
