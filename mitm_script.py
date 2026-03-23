@@ -24,6 +24,17 @@ def request(flow: http.HTTPFlow) -> None:
         return
     ctx.log.warn(f"[REQ] {flow.request.method} {flow.request.path}")
 
+    # Logger les bodies des requetes importantes
+    if flow.request.method == "POST" and flow.request.content:
+        try:
+            req_body = flow.request.content.decode("utf-8", errors="ignore")
+            # Tronquer si trop long (base64 des photos)
+            if len(req_body) > 2000:
+                req_body = req_body[:2000] + "... [TRONQUE]"
+            ctx.log.warn(f"[REQ BODY] {req_body}")
+        except Exception:
+            ctx.log.warn(f"[REQ BODY] (binaire, {len(flow.request.content)} bytes)")
+
 
 def response(flow: http.HTTPFlow) -> None:
     host = flow.request.pretty_host.lower()
@@ -35,6 +46,16 @@ def response(flow: http.HTTPFlow) -> None:
     method = flow.request.method
 
     ctx.log.warn(f"[RESP] {status} {method} {path}")
+
+    # Logger les bodies des reponses pour debug
+    if flow.response.content and path not in ("/certificall/logger/message",):
+        try:
+            resp_body = flow.response.content.decode("utf-8", errors="ignore")
+            if len(resp_body) > 2000:
+                resp_body = resp_body[:2000] + "... [TRONQUE]"
+            ctx.log.warn(f"[RESP BODY] {resp_body}")
+        except Exception:
+            pass
 
     if status in (401, 403):
         try:
