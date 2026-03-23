@@ -1,14 +1,18 @@
 """
 MITM Proxy Script — Intercepte le trafic Certificall.
-Modifie les reponses 401/403 en 200 OK.
+Modifie les reponses 401/403 en 200 OK avec des donnees coherentes.
 """
 
 import json
-import random
+import re
+import time
+import hashlib
 from mitmproxy import http, ctx, tls
 
-# Compteur unique pour chaque item cree
-_item_counter = random.randint(10000, 99999)
+# Cache des items crees: cle = hash du body -> response coherente
+_item_cache = {}
+_item_counter = 10000
+_last_case_id = None
 
 
 def tls_clienthello(data: tls.ClientHelloData):
@@ -18,25 +22,58 @@ def tls_clienthello(data: tls.ClientHelloData):
         data.ignore_connection = True
 
 
+def _extract_case_id(content):
+    """Essaie d'extraire le caseId du body (JSON ou multipart binaire)."""
+    if not content:
+        return None
+    try:
+        # Essayer JSON direct
+        data = json.loads(content)
+        if isinstance(data, dict) and "caseId" in data:
+            return data["caseId"]
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        pass
+
+    # Chercher dans le contenu brut (multipart peut contenir du JSON)
+    try:
+        text = content.decode("utf-8", errors="ignore")
+        # Chercher "caseId":XXXX dans le texte
+        match = re.search(r'"caseId"\s*:\s*(\d+)', text)
+        if match:
+            return int(match.group(1))
+        # Chercher caseId=XXXX (form data)
+        match = re.search(r'caseId[=:]\s*(\d+)', text)
+        if match:
+            return int(match.group(1))
+    except Exception:
+        pass
+    return None
+
+
+def _get_body_key(content):
+    """Genere une cle stable pour le cache basee sur le contenu."""
+    if not content:
+        return "empty"
+    return hashlib.md5(content[:1024]).hexdigest()
+
+
 def request(flow: http.HTTPFlow) -> None:
+    global _last_case_id
     host = flow.request.pretty_host.lower()
     if "certificall" not in host:
         return
     ctx.log.warn(f"[REQ] {flow.request.method} {flow.request.path}")
 
-    # Logger les bodies des requetes importantes
+    # Extraire le caseId des requetes pour l'utiliser dans les responses
     if flow.request.method == "POST" and flow.request.content:
-        try:
-            req_body = flow.request.content.decode("utf-8", errors="ignore")
-            # Tronquer si trop long (base64 des photos)
-            if len(req_body) > 2000:
-                req_body = req_body[:2000] + "... [TRONQUE]"
-            ctx.log.warn(f"[REQ BODY] {req_body}")
-        except Exception:
-            ctx.log.warn(f"[REQ BODY] (binaire, {len(flow.request.content)} bytes)")
+        case_id = _extract_case_id(flow.request.content)
+        if case_id:
+            _last_case_id = case_id
+            ctx.log.warn(f"[REQ] caseId extrait: {case_id}")
 
 
 def response(flow: http.HTTPFlow) -> None:
+    global _item_counter, _last_case_id
     host = flow.request.pretty_host.lower()
     if "certificall" not in host:
         return
@@ -47,33 +84,29 @@ def response(flow: http.HTTPFlow) -> None:
 
     ctx.log.warn(f"[RESP] {status} {method} {path}")
 
-    # Logger les bodies des reponses pour debug
-    if flow.response.content and path not in ("/certificall/logger/message",):
-        try:
-            resp_body = flow.response.content.decode("utf-8", errors="ignore")
-            if len(resp_body) > 2000:
-                resp_body = resp_body[:2000] + "... [TRONQUE]"
-            ctx.log.warn(f"[RESP BODY] {resp_body}")
-        except Exception:
-            pass
-
     if status in (401, 403):
-        try:
-            body = flow.response.content.decode("utf-8", errors="ignore")[:500]
-        except Exception:
-            body = ""
+        # Generer un ID stable: si meme requete, meme ID
+        body_key = _get_body_key(flow.request.content)
+        if body_key in _item_cache:
+            item_id = _item_cache[body_key]
+            ctx.log.error(f"[BYPASS] {status} -> 200 | {method} {path} (cached id={item_id})")
+        else:
+            _item_counter += 1
+            item_id = _item_counter
+            _item_cache[body_key] = item_id
+            ctx.log.error(f"[BYPASS] {status} -> 200 | {method} {path} (new id={item_id})")
 
-        global _item_counter
-        _item_counter += 1
-
-        ctx.log.error(f"[BYPASS] {status} -> 200 | {method} {path} (id={_item_counter})")
+        case_id = _last_case_id or 1
+        now = int(time.time() * 1000)
 
         fake_body = {
-            "id": _item_counter,
-            "caseId": 1,
+            "id": item_id,
+            "caseId": case_id,
             "status": "COMPLETED",
             "success": True,
-            "message": "OK"
+            "message": "OK",
+            "createdAt": now,
+            "updatedAt": now,
         }
 
         flow.response.status_code = 200
@@ -87,7 +120,8 @@ def response(flow: http.HTTPFlow) -> None:
             "success": True,
             "status": "COMPLETED",
             "trustScore": 100,
-            "message": "OK"
+            "message": "OK",
+            "analysisId": f"analysis-{int(time.time())}",
         }
 
         flow.response.status_code = 200
