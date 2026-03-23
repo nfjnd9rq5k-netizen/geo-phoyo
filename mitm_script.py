@@ -89,6 +89,12 @@ def request(flow: http.HTTPFlow) -> None:
     method = flow.request.method
     ctx.log.warn(f"[REQ] {method} {path}")
 
+    # Supprimer les headers d'integrite qui bloquent les requetes
+    for h in ["x-integrity-error", "x-integrity-token"]:
+        if h in flow.request.headers:
+            del flow.request.headers[h]
+            ctx.log.warn(f"[REQ] Supprime header: {h}")
+
     if method == "POST" and flow.request.content:
         case_id = _extract_case_id(flow.request.content)
         if case_id:
@@ -129,6 +135,17 @@ def response(flow: http.HTTPFlow) -> None:
             if len(body) > 2000:
                 body = body[:2000] + "...[TRONQUE]"
             ctx.log.warn(f"[RESP BODY] {body}")
+        except Exception:
+            pass
+
+    # Forcer play-integrity a false pour que l'app n'envoie pas de token
+    if "feature-flags/play-integrity" in path and status == 200:
+        try:
+            data = json.loads(flow.response.content)
+            if data.get("isActivated"):
+                data["isActivated"] = False
+                flow.response.content = json.dumps(data).encode()
+                ctx.log.warn(f"[PATCH] play-integrity force a false")
         except Exception:
             pass
 
