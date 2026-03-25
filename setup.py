@@ -415,6 +415,57 @@ def main():
         with open(main_js, 'w', encoding='utf-8') as f:
             f.write(js)
 
+    # ── 6b. Injection Frida Gadget (Play Integrity bypass) ──
+    print("\n  Injection Frida Gadget...")
+    gadget_src = os.path.join(SCRIPT_DIR, "stack", "frida-gadget.so")
+    if not os.path.exists(gadget_src):
+        # Chercher aussi directement dans le dossier du projet
+        gadget_src = os.path.join(SCRIPT_DIR, "frida-gadget.so")
+    if os.path.exists(gadget_src):
+        # Copier frida-gadget.so dans lib/x86_64/ et lib/arm64-v8a/
+        for arch in ["x86_64", "arm64-v8a"]:
+            arch_dir = os.path.join(decompiled, "lib", arch)
+            os.makedirs(arch_dir, exist_ok=True)
+            gadget_dest = os.path.join(arch_dir, "libfrida-gadget.so")
+            if arch == "x86_64":
+                src = os.path.join(SCRIPT_DIR, "stack", "frida-gadget.so")
+            else:
+                src = os.path.join(SCRIPT_DIR, "stack", "frida-gadget-arm64.so")
+            if os.path.exists(src) and not os.path.exists(gadget_dest):
+                shutil.copy2(src, gadget_dest)
+                print(f"  Frida Gadget copie: {arch}")
+
+        # Creer le fichier de config pour chaque arch
+        gadget_config = '{"interaction": {"type": "script", "path": "/data/local/tmp/frida_hooks.js", "on_change": "reload"}}'
+        for arch in ["x86_64", "arm64-v8a"]:
+            config_dest = os.path.join(decompiled, "lib", arch, "libfrida-gadget.config.so")
+            if not os.path.exists(config_dest):
+                with open(config_dest, 'w') as f:
+                    f.write(gadget_config)
+                print(f"  Frida config cree: {arch}")
+
+        # Patch smali: ajouter System.loadLibrary("frida-gadget") dans MainActivity.onCreate
+        main_activity = os.path.join(decompiled, "smali", "app", "certificall", "MainActivity.smali")
+        if os.path.exists(main_activity):
+            with open(main_activity, 'r') as f:
+                smali = f.read()
+            if 'frida-gadget' not in smali:
+                # Injecter le loadLibrary au debut de onCreate
+                old_oncreate = '.method public onCreate(Landroid/os/Bundle;)V\n    .locals 1'
+                new_oncreate = '.method public onCreate(Landroid/os/Bundle;)V\n    .locals 1\n\n    # Load Frida Gadget\n    const-string v0, "frida-gadget"\n    invoke-static {v0}, Ljava/lang/System;->loadLibrary(Ljava/lang/String;)V'
+                if old_oncreate in smali:
+                    smali = smali.replace(old_oncreate, new_oncreate, 1)
+                    with open(main_activity, 'w') as f:
+                        f.write(smali)
+                    patches_applied += 1
+                    print("  Patch smali: loadLibrary(frida-gadget) -> MainActivity.onCreate")
+                else:
+                    print("  WARN: onCreate pattern non trouve dans MainActivity.smali")
+            else:
+                print("  Frida Gadget deja injecte dans smali")
+    else:
+        print("  WARN: frida-gadget.so non trouve, skip injection")
+
     # Patch: network_security_config.xml (pour le proxy MITM)
     print("\n[7/10] Configuration reseau + certificat CA...")
 
@@ -584,10 +635,34 @@ def main():
         print(f"  ERREUR installation: {out[:200]}")
         return False
 
-    # ── 10. Termine ──
+    # ── 10. Configuration finale + Frida hooks ──
     print("\n[10/10] Configuration finale...")
     run([adb, "shell", "settings put secure mock_location 0"])
     print("  mock_location: OFF")
+
+    # Pousser les hooks Frida vers le device
+    hooks_script = os.path.join(OUTPUT_DIR, "frida_hooks.js")
+    if not os.path.exists(hooks_script):
+        # Generer le script si pas encore fait
+        try:
+            from orchestrator import GeoPhotoOrchestrator
+            orch = GeoPhotoOrchestrator()
+            script_content = orch.build_frida_script()
+            with open(hooks_script, 'w') as f:
+                f.write(script_content)
+        except Exception as e:
+            print(f"  WARN: Impossible de generer frida_hooks.js: {e}")
+
+    if os.path.exists(hooks_script):
+        # Push via sdcard (workaround permissions)
+        import tempfile as _tmpmod
+        tmp_script = os.path.join(_tmpmod.gettempdir(), "frida_hooks.js")
+        shutil.copy2(hooks_script, tmp_script)
+        run([adb, "push", tmp_script, "/sdcard/frida_hooks.js"])
+        run([adb, "shell", "cp /sdcard/frida_hooks.js /data/local/tmp/frida_hooks.js"])
+        run([adb, "shell", "rm /sdcard/frida_hooks.js"])
+        run([adb, "shell", "chmod 644 /data/local/tmp/frida_hooks.js"])
+        print("  Frida hooks pousses vers le device")
 
     print()
     print("=" * 55)
