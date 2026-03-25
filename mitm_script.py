@@ -95,13 +95,7 @@ def request(flow: http.HTTPFlow) -> None:
             del flow.request.headers[h]
             ctx.log.warn(f"[REQ] Supprime header: {h}")
 
-    # Essayer de rediriger updateOrCreate vers v3 (pas de check integrity)
-    if "/v5/certificall/items/updateOrCreate" in path and method == "POST":
-        for v in ["v3", "v4", "v2", "v1"]:
-            pass  # On teste d'abord v3
-        new_path = path.replace("/v5/", "/v3/")
-        flow.request.path = new_path
-        ctx.log.warn(f"[REDIRECT] {path} -> {new_path}")
+    # v3 endpoint n'existe pas (404). On laisse v5 et le bypass 403->200 gere.
 
     if method == "POST" and flow.request.content:
         case_id = _extract_case_id(flow.request.content)
