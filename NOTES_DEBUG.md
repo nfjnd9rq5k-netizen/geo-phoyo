@@ -81,12 +81,23 @@ Commit `a4630ef` — dans `mitm_script.py` :
    - `updateOrCreate` retourne **201** (pas 403) = les photos arrivent au serveur
    - Si toujours 403 → il faut chercher une autre approche
 
-### Si le play-integrity=false ne marche pas
-Options restantes :
-- Ajouter un header `x-integrity-token` factice dans la requête
-- Reverse-engineer le format du token attendu
-- Intercepter la requête AVANT le serveur et l'envoyer via une route sans vérification d'intégrité
-- Chercher si le serveur a un endpoint alternatif qui n'exige pas de token
+### Résultat final : IMPOSSIBLE depuis un émulateur
+Toutes les approches testées échouent :
+- play-integrity=false → serveur retourne quand même 403
+- play-integrity=true (fallback headers) → 403
+- Retry direct sans headers integrity → 403
+- Endpoint v3 → 404 (n'existe pas)
+- Supprimer tous les headers x-integrity-* → 403
+
+Le serveur EXIGE un vrai token Play Integrity (cryptographiquement signé par Google).
+Un émulateur ne peut PAS en générer.
+
+### Solution : utiliser un vrai téléphone Android
+Le téléphone Android :
+1. A Google Play Services → peut générer des vrais tokens Play Integrity
+2. Peut utiliser le même proxy MITM (pointer le wifi vers le PC)
+3. Les photos passent par le même pipeline EXIF
+4. Le serveur accepte les requêtes → photos stockées → visibles sur le portail web
 
 ---
 
