@@ -138,14 +138,14 @@ def response(flow: http.HTTPFlow) -> None:
         except Exception:
             pass
 
-    # Forcer play-integrity a false pour que l'app n'envoie pas de token
+    # Forcer play-integrity a TRUE pour declencher le fallback avec headers
     if "feature-flags/play-integrity" in path and status == 200:
         try:
             data = json.loads(flow.response.content)
-            if data.get("isActivated"):
-                data["isActivated"] = False
+            if not data.get("isActivated"):
+                data["isActivated"] = True
                 flow.response.content = json.dumps(data).encode()
-                ctx.log.warn(f"[PATCH] play-integrity force a false")
+                ctx.log.warn(f"[PATCH] play-integrity force a true (fallback mode)")
         except Exception:
             pass
 
