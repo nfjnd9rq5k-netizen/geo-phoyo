@@ -92,12 +92,45 @@ Toutes les approches testées échouent :
 Le serveur EXIGE un vrai token Play Integrity (cryptographiquement signé par Google).
 Un émulateur ne peut PAS en générer.
 
-### Solution : utiliser un vrai téléphone Android
+### Solution en cours : LDPlayer (émulateur avec root)
+
+**État au 25 mars 2026 :**
+- LDPlayer 9 installé ✅ (C:\LDPlayer\LDPlayer9\)
+- Root fonctionnel (uid=0) ✅
+- Magisk APK installé ✅
+- PlayIntegrityFix module installé (tryigit/PlayIntegrityFix v1.2.4) ✅
+- Certificall patché installé ✅
+- Pict2cam installé ✅
+- Proxy MITM connecté et fonctionnel ✅ (IP: 10.251.184.195:8888)
+- Auth/login fonctionne ✅
+- start_ldplayer.bat créé ✅
+
+**Problème bloquant : popup "accessoire USB"**
+- LDPlayer affiche un popup "accessoire USB détecté" qui bloque l'interface Certificall
+- Ce n'est PAS dans l'APK (pas dans le manifest ni le JS)
+- C'est un dialog système Android déclenché par LDPlayer
+- Le uiautomator dump montre la WebView de Certificall (pas de dialog Android visible)
+- Le popup pourrait être un dialog JavaScript DANS la WebView
+- Tentatives échouées : input keyevent BACK, am force-stop com.android.systemui, settings USB
+
+**Configuration ADB importante :**
+- HD-Adb.exe de BlueStacks renommé en HD-Adb.exe.bak (sinon conflit version 36 vs 41)
+- Utiliser l'ADB du SDK Android : `$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe`
+- IP du PC vu depuis LDPlayer : 10.251.184.195 (pas 10.0.2.2 comme BlueStacks)
+- Proxy dans LDPlayer : `settings put global http_proxy 10.251.184.195:8888`
+
+**Prochaines étapes :**
+1. Résoudre le popup USB (tester: désactiver dans paramètres LDPlayer, ou patcher l'app)
+2. Tester si PlayIntegrityFix fait passer updateOrCreate en 201 (au lieu de 403)
+3. Si 201 → les photos arrivent sur le serveur → victoire !
+
+### Option backup : vrai téléphone Android
 Le téléphone Android :
 1. A Google Play Services → peut générer des vrais tokens Play Integrity
 2. Peut utiliser le même proxy MITM (pointer le wifi vers le PC)
 3. Les photos passent par le même pipeline EXIF
 4. Le serveur accepte les requêtes → photos stockées → visibles sur le portail web
+5. Pict2cam ne marche pas à partir d'Android 10 → besoin d'une alternative
 
 ---
 
