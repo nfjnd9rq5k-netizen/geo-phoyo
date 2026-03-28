@@ -149,6 +149,19 @@ label { font-size: 13px; color: #aaa; }
     <button class="btn" id="searchBtn" onclick="doSearch()">Rechercher</button>
     <div class="coords" id="coordsDisplay">Cliquez sur la carte</div>
     <label>IP: <input type="text" id="ip" value="86.234.12.45" /></label>
+    <label>iPhone: <select id="deviceSelect" onchange="doDeviceChange()">
+        <option value="iPhone 16 Pro Max">iPhone 16 Pro Max</option>
+        <option value="iPhone 16 Pro">iPhone 16 Pro</option>
+        <option value="iPhone 16">iPhone 16</option>
+        <option value="iPhone 15 Pro Max">iPhone 15 Pro Max</option>
+        <option value="iPhone 15 Pro" selected>iPhone 15 Pro</option>
+        <option value="iPhone 15">iPhone 15</option>
+        <option value="iPhone 14 Pro Max">iPhone 14 Pro Max</option>
+        <option value="iPhone 14 Pro">iPhone 14 Pro</option>
+        <option value="iPhone 14">iPhone 14</option>
+        <option value="iPhone 13 Pro">iPhone 13 Pro</option>
+        <option value="iPhone 13">iPhone 13</option>
+    </select></label>
     <div class="drop-zone" id="dropZone">Glisser une photo ici</div>
     <button class="btn btn-launch" id="launchBtn" onclick="doLaunch()">Lancer Certificall</button>
     <button class="btn btn-stop" id="stopBtn" onclick="doStop()" style="display:none;">Stop</button>
@@ -157,11 +170,11 @@ label { font-size: 13px; color: #aaa; }
 <div id="map"></div>
 
 <div class="status-bar">
-    <span>BlueStacks: <span class="status-dot" id="emuDot"></span> <span id="emuText">...</span></span>
-    <span>pict2cam: <span class="status-dot" id="p2cDot"></span></span>
-    <span>Frida: <span class="status-dot" id="fridaDot"></span> <span id="fridaText">inactif</span></span>
+    <span>Telephone: <span class="status-dot" id="emuDot"></span> <span id="emuText">...</span></span>
+    <span>Certificall: <span class="status-dot" id="appDot"></span> <span id="appText">arrete</span></span>
     <span>GPS: <span id="statusGps">--</span></span>
     <span>IP: <span id="statusIp">--</span></span>
+    <span>Device: <span id="statusDevice">iPhone 15 Pro</span></span>
     <span id="uploadStatus"></span>
 </div>
 
@@ -238,6 +251,18 @@ ipInput.addEventListener('input', function() {
     }, 500);
 });
 
+// ── Device iPhone ──
+function doDeviceChange() {
+    var sel = document.getElementById('deviceSelect');
+    fetch('/api/device', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({device: sel.value})
+    });
+}
+// Envoyer le device initial au chargement
+setTimeout(doDeviceChange, 1000);
+
 // ── Drop zone photo ──
 var dropZone = document.getElementById('dropZone');
 dropZone.addEventListener('dragover', function(e) { e.preventDefault(); dropZone.classList.add('dragover'); });
@@ -285,7 +310,7 @@ function doLaunch() {
     .then(function(data) {
         btn.disabled = false;
         if (data.ok) {
-            btn.textContent = 'Frida actif';
+            btn.textContent = 'Relancer Certificall';
             btn.classList.add('active');
             document.getElementById('stopBtn').style.display = '';
         } else {
@@ -308,33 +333,29 @@ function doStop() {
 // ── Status poll ──
 function pollStatus() {
     fetch('/api/status').then(function(r) { return r.json(); }).then(function(d) {
-        // BlueStacks
+        // Telephone
         var emuDot = document.getElementById('emuDot');
         var emuText = document.getElementById('emuText');
         emuDot.className = 'status-dot ' + (d.adb_connected ? 'dot-ok' : 'dot-ko');
         emuText.textContent = d.adb_connected ? 'connecte' : 'deconnecte';
-        // pict2cam
-        document.getElementById('p2cDot').className = 'status-dot ' + (d.pict2cam_installed ? 'dot-ok' : 'dot-ko');
-        // Frida
-        var fridaDot = document.getElementById('fridaDot');
-        var fridaText = document.getElementById('fridaText');
-        if (d.frida_active) {
-            fridaDot.className = 'status-dot dot-ok';
-            fridaText.textContent = 'actif';
-        } else if (d.frida_server_running) {
-            fridaDot.className = 'status-dot dot-warn';
-            fridaText.textContent = 'server OK';
+        // Certificall
+        var appDot = document.getElementById('appDot');
+        var appText = document.getElementById('appText');
+        if (d.certificall_running) {
+            appDot.className = 'status-dot dot-ok';
+            appText.textContent = 'en cours';
         } else {
-            fridaDot.className = 'status-dot dot-ko';
-            fridaText.textContent = 'inactif';
+            appDot.className = 'status-dot dot-ko';
+            appText.textContent = 'arrete';
         }
         // GPS / IP
         document.getElementById('statusGps').textContent = (d.lat || 0).toFixed(4) + ', ' + (d.lon || 0).toFixed(4);
         document.getElementById('statusIp').textContent = d.ip || '--';
+        if (d.device) document.getElementById('statusDevice').textContent = d.device;
         // Boutons
         var btn = document.getElementById('launchBtn');
-        if (d.frida_active) {
-            btn.textContent = 'Frida actif';
+        if (d.certificall_running) {
+            btn.textContent = 'Relancer Certificall';
             btn.classList.add('active');
             document.getElementById('stopBtn').style.display = '';
         } else {
@@ -388,6 +409,8 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             self._handle_gps()
         elif self.path == "/api/ip":
             self._handle_ip()
+        elif self.path == "/api/device":
+            self._handle_device()
         elif self.path == "/api/photo":
             self._handle_photo()
         elif self.path == "/api/launch":
@@ -438,6 +461,14 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             return
         ip = data.get("ip", "")
         orch.update_ip(ip)
+        self._json_response(200, {"ok": True})
+
+    def _handle_device(self):
+        data = self._read_json()
+        if data is None:
+            return
+        device = data.get("device", "iPhone 15 Pro")
+        orch.update_device(device)
         self._json_response(200, {"ok": True})
 
     def _handle_photo(self):
@@ -503,21 +534,20 @@ def main():
 
     if not status["adb_found"]:
         print("\n  ERREUR: ADB non trouve!")
-        print("  Verifiez que BlueStacks est installe.")
+        print("  Installez Android SDK platform-tools.")
         return
 
     if not status["connected"]:
-        print("\n  ATTENTION: Emulateur non connecte.")
-        print("  Lancez BlueStacks et reessayez.")
-
-    if status["connected"] and not status["pict2cam"]:
-        print("\n  ATTENTION: pict2cam non installe sur l'emulateur.")
-        print("  Installez-le: HD-Adb.exe install pict2cam.apk")
+        print("\n  ATTENTION: Telephone non connecte.")
+        print("  Branchez le telephone en USB et activez le debogage USB.")
 
     if status["certificall_package"]:
-        print(f"\n  Certificall: {status['certificall_package']}")
+        pkg_info = status['certificall_package']
+        if status.get("certificall_running"):
+            pkg_info += " (en cours)"
+        print(f"\n  Certificall: {pkg_info}")
     else:
-        print("\n  ATTENTION: Certificall non trouve sur l'emulateur.")
+        print("\n  ATTENTION: Certificall non trouve sur le telephone.")
 
     print(f"\n  Dashboard: http://127.0.0.1:{PORT}")
     print("  Ctrl+C pour arreter\n")

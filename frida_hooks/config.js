@@ -12,15 +12,15 @@ var CONFIG = {
     // Photo a injecter quand la camera est demandee
     fakePhotoPath: "/sdcard/DCIM/fake_photo.jpg",
 
-    // Identite device spoofee (Samsung Galaxy S21)
+    // Identite device spoofee (iPhone 15 Pro)
     device: {
-        brand: "samsung",
-        model: "SM-G991B",
-        manufacturer: "samsung",
-        product: "o1sxeea",
-        fingerprint: "samsung/o1sxeea/o1s:13/TP1A.220624.014/G991BXXS7DWBA:user/release-keys",
-        hardware: "exynos2100",
-        board: "exynos2100"
+        brand: "Apple",
+        model: "iPhone16,1",
+        manufacturer: "Apple",
+        product: "iPhone16,1",
+        fingerprint: "Apple/iPhone16,1/iPhone16,1:26.1/23B81/1:user/release-keys",
+        hardware: "iPhone16,1",
+        board: "D83AP"
     },
 
     // Identite telephonie spoofee

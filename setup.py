@@ -3,7 +3,7 @@ Setup automatique — Geo Photo v3
 Telecharge, patche et installe tout automatiquement.
 
 Prerequis:
-  - BlueStacks 5 installe et lance (instance Pie64)
+  - Emulateur Android (LDPlayer 9 recommande) installe et lance
   - Python 3.10+
   - Java JDK 17 (Eclipse Adoptium)
 """
@@ -32,6 +32,7 @@ JAVA_CANDIDATES = [
 ]
 
 ADB_CANDIDATES = [
+    # LDPlayer et BlueStacks ont leur propre ADB, mais on prefere celui du SDK Android
     os.path.join(os.environ.get("ProgramFiles", ""), "BlueStacks_nxt", "HD-Adb.exe"),
     os.path.join(os.environ.get("ProgramFiles(x86)", ""), "BlueStacks_nxt", "HD-Adb.exe"),
 ]
@@ -188,7 +189,7 @@ def main():
 
     adb = find_adb()
     if not adb:
-        print("  ERREUR: ADB/BlueStacks non trouve!")
+        print("  ERREUR: ADB non trouve! Installez Android SDK platform-tools.")
         return False
     print(f"  ADB: {adb}")
 
@@ -412,12 +413,21 @@ def main():
             patches_applied += 1
             print("  Patch JS: handleCaseError -> silent success")
 
+        # Patch: usbCheck / isCharging -> neutraliser le popup "accessoire USB non autorise"
+        # L'app detecte isCharging (batterie en charge) et affiche un modal bloquant.
+        # Sur emulateur, isCharging est toujours true. On remplace le check par false.
+        usb_pattern = re.compile(r'getBatteryInfo\(\)\)\.isCharging')
+        if usb_pattern.search(js):
+            js = usb_pattern.sub('getBatteryInfo()).isCharging&&false', js)
+            patches_applied += 1
+            print("  Patch JS: isCharging check -> disabled (popup USB neutralise)")
+
         with open(main_js, 'w', encoding='utf-8') as f:
             f.write(js)
 
     # ── 6b. Injection Frida Gadget (Play Integrity bypass) ──
     print("\n  Injection Frida Gadget...")
-    gadget_src = os.path.join(SCRIPT_DIR, "stack", "frida-gadget.so")
+    gadget_src = os.path.join(SCRIPT_DIR, "tools", "frida-gadget.so")
     if not os.path.exists(gadget_src):
         # Chercher aussi directement dans le dossier du projet
         gadget_src = os.path.join(SCRIPT_DIR, "frida-gadget.so")
@@ -428,9 +438,9 @@ def main():
             os.makedirs(arch_dir, exist_ok=True)
             gadget_dest = os.path.join(arch_dir, "libfrida-gadget.so")
             if arch == "x86_64":
-                src = os.path.join(SCRIPT_DIR, "stack", "frida-gadget.so")
+                src = os.path.join(SCRIPT_DIR, "tools", "frida-gadget.so")
             else:
-                src = os.path.join(SCRIPT_DIR, "stack", "frida-gadget-arm64.so")
+                src = os.path.join(SCRIPT_DIR, "tools", "frida-gadget-arm64.so")
             if os.path.exists(src) and not os.path.exists(gadget_dest):
                 shutil.copy2(src, gadget_dest)
                 print(f"  Frida Gadget copie: {arch}")
@@ -579,8 +589,8 @@ def main():
          "--out", output, aligned])
     print(f"  APK signe: {output}")
 
-    # ── 9. Installer sur BlueStacks ──
-    print("\n[9/10] Installation sur BlueStacks...")
+    # ── 9. Installer sur l'emulateur ──
+    print("\n[9/10] Installation sur l'emulateur...")
 
     # Restart ADB server pour eviter les "error: closed"
     import time
@@ -592,7 +602,7 @@ def main():
     run([adb, "connect", "localhost:5555"], timeout=10)
     time.sleep(2)
 
-    # Attendre que BlueStacks soit vraiment connecte
+    # Attendre que l'emulateur soit connecte
     connected = False
     for attempt in range(15):
         ok, out, _ = run([adb, "devices"], timeout=10)
@@ -604,10 +614,10 @@ def main():
                 break
         time.sleep(2)
     if not connected:
-        print("  ERREUR: BlueStacks non connecte!")
-        print("  Lancez BlueStacks et reessayez.")
+        print("  ERREUR: Emulateur non connecte!")
+        print("  Lancez LDPlayer et reessayez.")
         return False
-    print("  BlueStacks connecte")
+    print("  Emulateur connecte")
 
     # Installer pict2cam
     ok, out, _ = run([adb, "shell", "pm", "list", "packages", "com.adriangl.pict2cam"])

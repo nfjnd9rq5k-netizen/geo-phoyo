@@ -1,11 +1,19 @@
+# Python
 __pycache__/
 *.pyc
+
+# Build artifacts
+_build/
 output/
+
+# Binaries (lourds, pas dans git)
+tools/
 *.apk
 *.xapk
-frida-server-x86_64
-frida-gadget*.so
-debug.keystore
-apktool.jar
-.claude/
+
+# Runtime
 ip_config.txt
+debug.keystore
+
+# IDE/tools
+.claude/

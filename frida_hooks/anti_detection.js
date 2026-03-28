@@ -538,6 +538,137 @@ function hookPlayIntegrity() {
     log("ANTI", "Play Integrity hooks installes");
 }
 
+function hookUsbManager() {
+    /**
+     * Cacher les peripheriques USB pour eviter le popup "accessoire USB non autorise".
+     */
+    try {
+        var UsbManager = Java.use("android.hardware.usb.UsbManager");
+
+        UsbManager.getDeviceList.implementation = function () {
+            log("ANTI", "UsbManager.getDeviceList() -> vide");
+            return Java.use("java.util.HashMap").$new();
+        };
+
+        UsbManager.getAccessoryList.implementation = function () {
+            log("ANTI", "UsbManager.getAccessoryList() -> null");
+            return null;
+        };
+
+        log("ANTI", "UsbManager hooks installes (USB cache)");
+    } catch (e) {
+        log("ANTI", "UsbManager hook erreur: " + e);
+    }
+}
+
+function hookUsbBroadcasts() {
+    /**
+     * Filtrer les broadcasts USB (ACTION_USB_ACCESSORY_ATTACHED, etc.)
+     * pour empecher l'app de reagir aux evenements USB.
+     */
+    try {
+        var ContextWrapper = Java.use("android.content.ContextWrapper");
+        var originalRegister = ContextWrapper.registerReceiver.overload(
+            "android.content.BroadcastReceiver", "android.content.IntentFilter"
+        );
+
+        originalRegister.implementation = function (receiver, filter) {
+            if (filter !== null) {
+                var count = filter.countActions();
+                for (var i = 0; i < count; i++) {
+                    var action = filter.getAction(i);
+                    if (action && action.toLowerCase().indexOf("usb") !== -1) {
+                        log("ANTI", "registerReceiver USB filtre: " + action);
+                        return null;
+                    }
+                }
+            }
+            return originalRegister.call(this, receiver, filter);
+        };
+
+        log("ANTI", "USB broadcast filter installe");
+    } catch (e) {
+        log("ANTI", "USB broadcast hook erreur: " + e);
+    }
+}
+
+function hookAlertDialogUsb() {
+    /**
+     * Intercepter AlertDialog pour bloquer les dialogs contenant "USB" ou "accessoire".
+     */
+    try {
+        var AlertDialog = Java.use("android.app.AlertDialog");
+        var originalShow = AlertDialog.show.overload();
+
+        originalShow.implementation = function () {
+            try {
+                // Recuperer le message du dialog via getWindow().getDecorView()
+                var msg = "";
+                try {
+                    // Tenter de lire le message via reflection
+                    var alertClass = Java.use("androidx.appcompat.app.AlertDialog");
+                    msg = this.getMessage() ? this.getMessage().toString() : "";
+                } catch (e1) {
+                    try {
+                        msg = this.getMessage() ? this.getMessage().toString() : "";
+                    } catch (e2) {}
+                }
+
+                if (msg.toLowerCase().indexOf("usb") !== -1 || msg.toLowerCase().indexOf("accessoire") !== -1) {
+                    log("ANTI", "AlertDialog.show() bloque (USB): " + msg.substring(0, 80));
+                    this.dismiss();
+                    return;
+                }
+            } catch (e) {}
+            originalShow.call(this);
+        };
+
+        log("ANTI", "AlertDialog USB hook installe");
+    } catch (e) {
+        log("ANTI", "AlertDialog hook erreur: " + e);
+    }
+}
+
+function hookWebViewUsbPopup() {
+    /**
+     * Intercepter les dialogs JavaScript (alert/confirm) dans les WebViews
+     * pour bloquer le popup "accessoire USB".
+     */
+    try {
+        var WebChromeClient = Java.use("android.webkit.WebChromeClient");
+
+        // Hook onJsAlert
+        WebChromeClient.onJsAlert.overload(
+            "android.webkit.WebView", "java.lang.String", "java.lang.String", "android.webkit.JsResult"
+        ).implementation = function (view, url, message, result) {
+            var msg = message ? message.toString() : "";
+            if (msg.toLowerCase().indexOf("usb") !== -1 || msg.toLowerCase().indexOf("accessoire") !== -1) {
+                log("ANTI", "JS alert bloque (USB): " + msg.substring(0, 80));
+                result.confirm();
+                return true;
+            }
+            return this.onJsAlert(view, url, message, result);
+        };
+
+        // Hook onJsConfirm
+        WebChromeClient.onJsConfirm.overload(
+            "android.webkit.WebView", "java.lang.String", "java.lang.String", "android.webkit.JsResult"
+        ).implementation = function (view, url, message, result) {
+            var msg = message ? message.toString() : "";
+            if (msg.toLowerCase().indexOf("usb") !== -1 || msg.toLowerCase().indexOf("accessoire") !== -1) {
+                log("ANTI", "JS confirm bloque (USB): " + msg.substring(0, 80));
+                result.confirm();
+                return true;
+            }
+            return this.onJsConfirm(view, url, message, result);
+        };
+
+        log("ANTI", "WebView USB popup hooks installes");
+    } catch (e) {
+        log("ANTI", "WebView USB hook erreur: " + e);
+    }
+}
+
 function hookScreenshotDetection() {
     /**
      * Retirer FLAG_SECURE pour permettre les screenshots/enregistrement.
@@ -559,6 +690,91 @@ function hookScreenshotDetection() {
     }
 }
 
+function hookBatteryCharging() {
+    /**
+     * Force isCharging=false pour empecher le modal "blockingModal.usbCheck"
+     * dans l'app Certificall (Capacitor Battery plugin lit via Intent BATTERY_CHANGED).
+     */
+    try {
+        // Hook 1: BatteryManager.isCharging() -> false
+        var BatteryManager = Java.use("android.os.BatteryManager");
+        BatteryManager.isCharging.implementation = function () {
+            log("ANTI", "BatteryManager.isCharging() -> false");
+            return false;
+        };
+        log("ANTI", "BatteryManager.isCharging hook installe");
+    } catch (e) {
+        log("ANTI", "BatteryManager hook erreur (normal si API<23): " + e);
+    }
+
+    try {
+        // Hook 2: Intent.getIntExtra() pour EXTRA_STATUS -> DISCHARGING (3)
+        var Intent = Java.use("android.content.Intent");
+        var origGetIntExtra = Intent.getIntExtra.overload("java.lang.String", "int");
+        origGetIntExtra.implementation = function (name, defaultValue) {
+            var result = origGetIntExtra.call(this, name, defaultValue);
+            if (name === "status") {
+                // 3 = BATTERY_STATUS_DISCHARGING, 2 = CHARGING
+                if (result === 2 || result === 5) {
+                    log("ANTI", "Intent.getIntExtra('status') " + result + " -> 3 (DISCHARGING)");
+                    return 3;
+                }
+            }
+            if (name === "plugged") {
+                if (result !== 0) {
+                    log("ANTI", "Intent.getIntExtra('plugged') " + result + " -> 0 (UNPLUGGED)");
+                    return 0;
+                }
+            }
+            return result;
+        };
+        log("ANTI", "Intent battery status hook installe");
+    } catch (e) {
+        log("ANTI", "Intent hook erreur: " + e);
+    }
+
+    try {
+        // Hook 3: Injecter JS dans WebView pour auto-dismiss le modal USB
+        var WebView = Java.use("android.webkit.WebView");
+        var origLoadUrl = WebView.loadUrl.overload("java.lang.String");
+        var jsInjected = false;
+
+        WebView.onPageFinished = undefined; // will use evaluateJavascript instead
+
+        // Periodiquement injecter JS pour fermer le modal
+        var handler = Java.use("android.os.Handler");
+        var looper = Java.use("android.os.Looper");
+        var h = handler.$new(looper.getMainLooper());
+        var Runnable = Java.use("java.lang.Runnable");
+
+        var dismissRunnable = Java.registerClass({
+            name: "com.frida.DismissUSBModal",
+            implements: [Runnable],
+            methods: {
+                run: function () {
+                    try {
+                        Java.choose("android.webkit.WebView", {
+                            onMatch: function (wv) {
+                                wv.evaluateJavascript(
+                                    "try{document.querySelectorAll('ion-modal,ion-alert,.alert-wrapper').forEach(function(m){m.remove()});document.querySelectorAll('.modal-wrapper,.overlay-backdrop,.sc-ion-modal-md').forEach(function(m){m.remove()});}catch(e){}",
+                                    null
+                                );
+                            },
+                            onComplete: function () {}
+                        });
+                    } catch (e) {}
+                    h.postDelayed(dismissRunnable, 3000);
+                }
+            }
+        }).$new();
+
+        h.postDelayed(dismissRunnable, 5000);
+        log("ANTI", "WebView USB modal auto-dismiss timer installe (toutes les 3s)");
+    } catch (e) {
+        log("ANTI", "WebView JS injection erreur: " + e);
+    }
+}
+
 function initAntiDetectionHooks() {
     hookBuildFields();
     hookFileExists();
@@ -571,5 +787,11 @@ function initAntiDetectionHooks() {
     // hookFridaDetection() est appele separement dans main.js (hooks natifs, pas besoin de Java)
     hookPlayIntegrity();
     hookScreenshotDetection();
+    // USB popup suppression (multi-couches)
+    hookBatteryCharging();
+    hookUsbManager();
+    hookUsbBroadcasts();
+    hookAlertDialogUsb();
+    hookWebViewUsbPopup();
     log("ANTI", "=== Tous les hooks anti-detection actifs ===");
 }

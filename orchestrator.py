@@ -1,6 +1,6 @@
 """
-Orchestrator v3 - Coeur du systeme Geo Photo.
-Gere le pipeline photo, la session Frida, et la coordination ADB.
+Orchestrator v3 - Coeur du systeme Geo Photo (mode telephone).
+Gere le pipeline photo (EXIF + GPS) et la coordination ADB.
 """
 
 import os
@@ -16,15 +16,11 @@ from geo import modify_geolocation
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(SCRIPT_DIR, "output")
-HOOKS_DIR = os.path.join(SCRIPT_DIR, "frida_hooks")
 
 
 class GeoPhotoOrchestrator:
     def __init__(self):
         self.adb_path = None
-        self.frida_session = None
-        self.frida_script = None
-        self.frida_device = None
         self._log_lines = []
         self._log_lock = threading.Lock()
         self.state = {
@@ -33,7 +29,6 @@ class GeoPhotoOrchestrator:
             "ip": "86.234.12.45",
             "altitude": 35.0,
             "certificall_package": None,
-            "frida_active": False,
             "last_photo": None,
         }
         self.state_lock = threading.Lock()
@@ -57,45 +52,50 @@ class GeoPhotoOrchestrator:
 
     def setup(self):
         """Initialise ADB, verifie les prerequis. Retourne un dict de status."""
-        # Initialiser l'IP dans le fichier config pour le proxy MITM
-        ip_config = os.path.join(SCRIPT_DIR, "ip_config.txt")
+        # Initialiser les fichiers config pour le proxy MITM
         with self.state_lock:
             ip = self.state["ip"]
+            lat = self.state["lat"]
+            lon = self.state["lon"]
+
+        ip_config = os.path.join(SCRIPT_DIR, "ip_config.txt")
         with open(ip_config, "w") as f:
             f.write(ip)
+
+        gps_config = os.path.join(SCRIPT_DIR, "gps_config.txt")
+        with open(gps_config, "w") as f:
+            f.write(f"{lat},{lon}")
 
         self.adb_path = bsc.find_adb()
         status = {
             "adb_found": self.adb_path is not None,
             "connected": False,
-            "pict2cam": False,
-            "frida_server": False,
             "certificall_package": None,
+            "certificall_running": False,
         }
         if not self.adb_path:
             self._log("ADB non trouve")
             return status
 
-        if not bsc.is_connected(self.adb_path):
-            bsc.connect_bluestacks(self.adb_path)
-
         status["connected"] = bsc.is_connected(self.adb_path)
         if not status["connected"]:
-            self._log("Emulateur non connecte")
+            self._log("Telephone non connecte")
             return status
-
-        status["pict2cam"] = bsc.is_pict2cam_installed(self.adb_path)
-        status["frida_server"] = bsc.is_frida_server_running(self.adb_path)
 
         pkg = bsc.find_certificall_package(self.adb_path)
         status["certificall_package"] = pkg
         with self.state_lock:
             self.state["certificall_package"] = pkg
 
+        if pkg:
+            pid = bsc.get_app_pid(pkg, self.adb_path)
+            status["certificall_running"] = pid is not None
+            if pid:
+                self._log(f"Certificall deja en cours (PID {pid})")
+
         self._log(f"ADB: {self.adb_path}")
-        self._log(f"pict2cam: {'OK' if status['pict2cam'] else 'MANQUANT'}")
-        self._log(f"frida-server: {'OK' if status['frida_server'] else 'INACTIF'}")
-        self._log(f"Certificall: {pkg or 'NON TROUVE'}")
+        self._log(f"Telephone: connecte")
+        self._log(f"Certificall: {pkg or 'NON TROUVE'}{' (en cours)' if status['certificall_running'] else ''}")
 
         return status
 
@@ -130,9 +130,9 @@ class GeoPhotoOrchestrator:
         ifd0 = exif_dict.setdefault("0th", {})
         exif_ifd = exif_dict.setdefault("Exif", {})
 
-        # Utiliser le meme appareil pour toute la session
+        # Forcer profil iPhone (coherent avec le spoof iOS du proxy)
         if self.current_device is None:
-            self.current_device = random.choice(self.DEVICE_PROFILES)
+            self.current_device = {"make": b"Apple", "model": b"iPhone 15 Pro", "sw": b"26.1", "focal": (5700, 1000), "focal35": 24, "fnum": (178, 100)}
         device = self.current_device
         self._log(f"Appareil: {device['make'].decode()} {device['model'].decode()}")
 
@@ -213,7 +213,7 @@ class GeoPhotoOrchestrator:
         return new_path, new_filename
 
     def process_photo(self, input_path, filename):
-        """Modifie EXIF + push vers BlueStacks. Retourne (success, message)."""
+        """Modifie EXIF (GPS + camera) et sauvegarde dans output/. Le proxy MITM remplace la photo lors de l'upload."""
         os.makedirs(OUTPUT_DIR, exist_ok=True)
 
         with self.state_lock:
@@ -243,165 +243,93 @@ class GeoPhotoOrchestrator:
         # Re-injecter apres geo.py (il nettoie Software)
         self._inject_camera_metadata(input_path)
 
-        # Sauvegarder dans output/
+        # Sauvegarder dans output/ (le proxy MITM lira la derniere photo ici)
         output_path = os.path.join(OUTPUT_DIR, filename)
         shutil.copy2(input_path, output_path)
-
-        # Push vers BlueStacks
-        push_ok, push_msg = bsc.push_photo(input_path, self.adb_path)
-        if push_ok:
-            self._log(f"Photo push OK: {filename}")
-        else:
-            self._log(f"Photo push ECHEC: {push_msg}")
+        self._log(f"Photo prete: {filename} (le proxy la remplacera lors de l'upload)")
 
         with self.state_lock:
             self.state["last_photo"] = output_path
 
         return True, output_path
 
-    # ── Frida ──
-
-    def build_frida_script(self):
-        """Construit le script Frida en concatenant les hooks JS."""
-        js_files = [
-            "config.js",
-            "anti_detection.js",
-            "ssl_bypass.js",
-            "spoof_location.js",
-            "ip_spoof.js",
-            "main.js",
-        ]
-
-        parts = []
-        for fname in js_files:
-            fpath = os.path.join(HOOKS_DIR, fname)
-            if not os.path.exists(fpath):
-                self._log(f"ATTENTION: {fname} introuvable")
-                continue
-            with open(fpath, "r", encoding="utf-8") as f:
-                content = f.read()
-
-            # Injecter les overrides apres config.js
-            if fname == "config.js":
-                with self.state_lock:
-                    lat = self.state["lat"]
-                    lon = self.state["lon"]
-                    alt = self.state["altitude"]
-                    ip = self.state["ip"]
-                overrides = f"""
-// === CONFIG OVERRIDES (injecte par orchestrator.py) ===
-CONFIG.latitude = {lat};
-CONFIG.longitude = {lon};
-CONFIG.altitude = {alt};
-CONFIG.network.ip = "{ip}";
-CONFIG.network.enabled = true;
-"""
-                content += overrides
-
-            parts.append(f"// ── {fname} ──\n{content}\n")
-
-        return "\n".join(parts)
-
-    def _push_hooks_to_device(self):
-        """Pousse le script JS concatene vers /data/local/tmp/frida_hooks.js."""
-        script_content = self.build_frida_script()
-        local_script = os.path.join(OUTPUT_DIR, "frida_hooks.js")
-        with open(local_script, "w", encoding="utf-8") as f:
-            f.write(script_content)
-
-        # Push via sdcard puis copie (evite les problemes de path Git Bash)
-        import tempfile as _tmpmod
-        tmp_script = os.path.join(_tmpmod.gettempdir(), "frida_hooks.js")
-        shutil.copy2(local_script, tmp_script)
-        bsc.run_adb(["push", tmp_script, "/sdcard/frida_hooks.js"], self.adb_path)
-        bsc.run_adb(["shell", "cp /sdcard/frida_hooks.js /data/local/tmp/frida_hooks.js"], self.adb_path)
-        bsc.run_adb(["shell", "rm /sdcard/frida_hooks.js"], self.adb_path)
-        self._log(f"Script hooks pousse ({len(script_content)} octets)")
-
     def launch_certificall(self):
-        """Lance Certificall. Le proxy MITM gere les checks serveur."""
+        """(Re)lance Certificall sur le telephone."""
         with self.state_lock:
             package = self.state["certificall_package"]
         if not package:
             package = bsc.find_certificall_package(self.adb_path)
             if not package:
-                return False, "Package Certificall non trouve sur l'appareil"
+                return False, "Package Certificall non trouve sur le telephone"
             with self.state_lock:
                 self.state["certificall_package"] = package
 
-        # 1. Desactiver mock_location
-        bsc.run_adb(["shell", "settings put secure mock_location 0"], self.adb_path)
+        self._log(f"Arret de {package}...")
+        bsc.run_adb(["shell", "am", "force-stop", package], self.adb_path)
+        time.sleep(1)
 
-        # 2. Verifier le proxy MITM
-        ok, proxy = bsc.run_adb(["shell", "settings get global http_proxy"], self.adb_path)
-        if not ok or "8888" not in (proxy or ""):
-            self._log("Configuration du proxy MITM...")
-            bsc.run_adb(["shell", "settings put global http_proxy 10.0.2.2:8888"], self.adb_path)
-
-        # 3. Lancer l'app
         self._log(f"Lancement {package}...")
         bsc.launch_app(package, self.adb_path)
 
-        with self.state_lock:
-            self.state["frida_active"] = True
-
-        self._log("Certificall lance! (proxy MITM actif)")
-        return True, "Certificall lance avec proxy MITM"
+        self._log("Certificall lance (proxy MITM actif)")
+        return True, "Certificall lance"
 
     def update_location(self, lat, lon):
-        """Met a jour GPS (state + ADB)."""
+        """Met a jour GPS (state + gps_config.txt pour le proxy)."""
         with self.state_lock:
             self.state["lat"] = lat
             self.state["lon"] = lon
 
-        # ADB geo fix
-        bsc.set_gps_via_geo_fix(lat, lon, self.adb_path)
+        # Ecrire dans gps_config.txt pour le proxy MITM
+        gps_config = os.path.join(SCRIPT_DIR, "gps_config.txt")
+        with open(gps_config, "w") as f:
+            f.write(f"{lat},{lon}")
 
     def update_ip(self, ip):
         """Met a jour l'IP spoofee (ecrit dans ip_config.txt pour le proxy MITM)."""
         with self.state_lock:
             self.state["ip"] = ip
 
-        # Ecrire l'IP dans le fichier que le proxy MITM lit
         ip_config = os.path.join(SCRIPT_DIR, "ip_config.txt")
         with open(ip_config, "w") as f:
             f.write(ip)
         self._log(f"IP mise a jour: {ip}")
 
-        # Re-push le script hooks avec la nouvelle IP
-        if self.state.get("frida_active"):
-            self._push_hooks_to_device()
+    def update_device(self, device_name):
+        """Met a jour le modele iPhone (ecrit dans device_config.txt pour le proxy MITM)."""
+        with self.state_lock:
+            self.state["device"] = device_name
+
+        device_config = os.path.join(SCRIPT_DIR, "device_config.txt")
+        with open(device_config, "w") as f:
+            f.write(device_name)
+        self._log(f"Device mis a jour: {device_name}")
 
     def get_status(self):
-        """Retourne le status complet."""
+        """Retourne le status complet (detecte l'etat reel via ADB)."""
         with self.state_lock:
             data = dict(self.state)
 
         data["adb_connected"] = bsc.is_connected(self.adb_path)
-        data["pict2cam_installed"] = bsc.is_pict2cam_installed(self.adb_path) if data["adb_connected"] else False
-        data["frida_server_running"] = bsc.is_frida_server_running(self.adb_path) if data["adb_connected"] else False
-        data["frida_active"] = self.frida_session is not None and self.state.get("frida_active", False)
+
+        if data["adb_connected"]:
+            pkg = data.get("certificall_package")
+            data["certificall_running"] = False
+            if pkg:
+                data["certificall_running"] = bsc.get_app_pid(pkg, self.adb_path) is not None
+        else:
+            data["certificall_running"] = False
 
         return data
 
     def stop(self):
-        """Arrete la session Frida proprement."""
-        if self.frida_script:
-            try:
-                self.frida_script.unload()
-            except Exception:
-                pass
-            self.frida_script = None
-
-        if self.frida_session:
-            try:
-                self.frida_session.detach()
-            except Exception:
-                pass
-            self.frida_session = None
-
+        """Arrete Certificall proprement."""
         with self.state_lock:
-            self.state["frida_active"] = False
+            package = self.state.get("certificall_package")
 
-        self._log("Session Frida arretee")
+        if package:
+            bsc.run_adb(["shell", "am", "force-stop", package], self.adb_path)
+            self._log(f"{package} arrete")
+
+        self._log("Session arretee")
         return True, "Session arretee"

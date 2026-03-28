@@ -1,5 +1,5 @@
 """
-BlueStacks Controller v3 - Controle BlueStacks via ADB.
+ADB Controller v3 - Controle emulateur Android (LDPlayer/BlueStacks) via ADB.
 Gere GPS, photos, proxy, connexion, et frida-server.
 """
 
@@ -14,10 +14,10 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 def find_adb():
     """Trouve le chemin ADB (BlueStacks ou standard)."""
     candidates = [
+        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Android", "Sdk", "platform-tools", "adb.exe"),
         os.path.join(os.environ.get("ProgramFiles", ""), "BlueStacks_nxt", "HD-Adb.exe"),
         os.path.join(os.environ.get("ProgramFiles(x86)", ""), "BlueStacks_nxt", "HD-Adb.exe"),
         os.path.join(os.environ.get("ProgramFiles", ""), "Genymotion", "tools", "adb.exe"),
-        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Android", "Sdk", "platform-tools", "adb.exe"),
     ]
     for path in candidates:
         if os.path.exists(path):
@@ -148,7 +148,7 @@ def ensure_frida_server(adb_path=None):
     success, _ = run_adb(["shell", "ls /data/local/tmp/frida-server"], adb_path)
     if not success:
         # Chercher le binaire local
-        local_frida = os.path.join(SCRIPT_DIR, "frida-server-x86_64")
+        local_frida = os.path.join(SCRIPT_DIR, "tools", "frida-server-x86_64")
         if not os.path.exists(local_frida):
             return False, "frida-server-x86_64 introuvable dans le dossier du projet"
         # Push via /sdcard/ (contourne les problemes de permission)
@@ -186,6 +186,12 @@ def kill_frida_server(adb_path=None):
     run_adb(["shell", "su -c 'killall frida-server'"], adb_path)
     run_adb(["shell", "killall frida-server"], adb_path)
     return True, "frida-server arrete"
+
+
+def is_frida_hooks_deployed(adb_path=None):
+    """Verifie si le script Frida hooks est deploye sur l'appareil (pour Frida Gadget)."""
+    success, output = run_adb(["shell", "test -f /data/local/tmp/frida_hooks.js && echo YES"], adb_path)
+    return success and "YES" in (output or "")
 
 
 # ── App management ──

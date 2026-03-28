@@ -53,18 +53,40 @@ echo [3/6] Reset...
 timeout /t 2 /nobreak >nul
 
 :: 4. Lancer mitmproxy
-echo [4/6] Demarrage proxy MITM...
+echo [4/7] Demarrage proxy MITM...
 start "MITM Proxy" /min %MITMDUMP% --listen-host 0.0.0.0 --listen-port 8888 -s "%SCRIPT_DIR%mitm_script.py" --set block_global=false
 timeout /t 3 /nobreak >nul
 
-:: 5. Configurer proxy (IP du PC vu depuis LDPlayer)
-echo [5/6] Configuration proxy + lancement Certificall...
-%ADB% shell "settings put global http_proxy 10.251.184.195:8888" >nul 2>&1
+:: 5. Configurer proxy (detecter IP automatiquement)
+echo [5/7] Configuration proxy...
+
+:: Detecter l'IP du PC (adaptateur avec gateway = reseau actif)
+set PC_IP=
+for /f "usebackq tokens=*" %%i in (`powershell -NoProfile -Command "((Get-NetIPConfiguration | Where-Object { $_.IPv4DefaultGateway }).IPv4Address.IPAddress | Select-Object -First 1)"`) do set PC_IP=%%i
+if not defined PC_IP (
+    echo   ERREUR: IP non detectee automatiquement.
+    set /p PC_IP="  Entrez l'IP du PC: "
+)
+echo   IP du PC detectee: %PC_IP%
+%ADB% shell "settings put global http_proxy %PC_IP%:8888" >nul 2>&1
+
+:: Simuler batterie debranchee (empeche le popup "accessoire USB non autorise")
+:: L'app Certificall detecte isCharging et bloque l'interface. Ceci trompe getBatteryInfo().
+%ADB% shell "dumpsys battery unplug" >nul 2>&1
+%ADB% shell "dumpsys battery set status 3" >nul 2>&1
+echo   Batterie simulee: debranchee (bypass popup USB)
+
+:: 6. Push Frida hooks (OBLIGATOIRE avant de lancer Certificall)
+echo [6/7] Push Frida hooks...
+python "%SCRIPT_DIR%push_hooks.py"
 timeout /t 1 /nobreak >nul
+
+:: Lancer Certificall (Frida Gadget dans l'APK charge /data/local/tmp/frida_hooks.js)
+echo   Lancement Certificall...
 %ADB% shell "monkey -p app.certificall -c android.intent.category.LAUNCHER 1" >nul 2>&1
 
-:: 6. Dashboard
-echo [6/6] Demarrage dashboard...
+:: 7. Dashboard
+echo [7/7] Demarrage dashboard...
 echo.
 echo ===================================================
 echo   TOUT EST PRET ! (LDPlayer)
@@ -83,5 +105,6 @@ echo.
 echo Nettoyage...
 taskkill /F /IM mitmdump.exe >nul 2>&1
 %ADB% shell "settings put global http_proxy :0" >nul 2>&1
+%ADB% shell "dumpsys battery reset" >nul 2>&1
 echo Proxy supprime. Au revoir!
 pause
